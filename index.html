@@ -1737,12 +1737,17 @@
 
     function isInvalidDraftRecord(record) {
       const title = displayCreatorName(record);
-      return !record?.dateISO
+      const hasNoBookingInfo = !record?.dateISO
         && !record?.timeText
         && !record?.phone
-        && (!record?.name || title === "未识别账号")
+        && !record?.pax;
+      const isBlankUnknown = (!record?.name || title === "未识别账号")
         && !record?.followers
         && !record?.engagement;
+      const isOrphanPublishedPost = normalizeStatus(record?.status) === "已发布"
+        && record?.postUrl
+        && hasNoBookingInfo;
+      return hasNoBookingInfo && (isBlankUnknown || isOrphanPublishedPost);
     }
 
     async function saveRecords(options = {}) {
