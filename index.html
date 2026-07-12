@@ -893,7 +893,7 @@
         timeText: booking.timeText || "",
         pax: booking.pax || "",
         phone: booking.phone || "",
-        menu: state.mode === "post" ? "" : menu.value,
+        menu: "",
         remarks: remarks.value.trim()
       };
     }
@@ -907,7 +907,7 @@
       profileLabel.textContent = isPost ? "帖子链接" : "博主主页链接";
       profileText.placeholder = isPost ? "https://www.instagram.com/p/..." : "https://www.instagram.com/username/";
       bookingField.style.display = isPost ? "none" : "";
-      menuField.style.display = isPost ? "none" : "";
+      menuField.style.display = "none";
     }
 
     function resetForm() {
@@ -1298,7 +1298,6 @@
         record.engagement ? `${record.platform === "Instagram" ? "数据" : "赞藏"} ${record.engagement}` : "",
         record.postDateText ? `发帖 ${record.postDateText}` : "",
         record.phone ? `电话 ${record.phone}` : "",
-        record.menu,
         record.remarks
       ].filter(Boolean).join(" · ");
       const classes = ["record"];
@@ -1463,10 +1462,10 @@
     }
 
     function exportCsv() {
-      const header = ["信息类型", "状态", "是否高亮", "日期", "星期", "时间", "发帖日期", "平台", "博主账号", "名字", "粉丝数", "数据/赞藏", "RSVP人数", "电话", "套餐", "备注", "提交人", "主页链接", "帖子链接", "更新时间"];
+      const header = ["信息类型", "状态", "是否高亮", "日期", "星期", "时间", "发帖日期", "平台", "博主账号", "名字", "粉丝数", "数据/赞藏", "RSVP人数", "电话", "备注", "提交人", "主页链接", "帖子链接", "更新时间"];
       const rows = state.records.slice().sort(sortRecords).map((item) => [
         item.type === "post" ? "发帖追踪" : "探店预约", normalizeStatus(item.status), isHighlighted(item) ? "是" : "", item.dateISO, item.weekday, item.timeText, item.postDateText || formatChineseDate(item.postPublishedAt), item.platform, item.handle, item.name, item.followers, item.engagement,
-        item.pax, item.phone, item.menu, item.remarks, item.submitter || item.owner, item.link, item.postUrl, item.createdAt
+        item.pax, item.phone, item.remarks, item.submitter || item.owner, item.link, item.postUrl, item.createdAt
       ]);
       const csv = [header, ...rows].map((row) => row.map(csvCell).join(",")).join("\n");
       const blob = new Blob(["\ufeff" + csv], { type: "text/csv;charset=utf-8" });
