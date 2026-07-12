@@ -163,13 +163,14 @@ cols = [
     ("博主", 320),
     ("平台", 140),
     ("粉丝", 130),
-    ("赞/数据", 150),
+    ("赞/数据", 140),
+    ("帖子数据", 230),
     ("人数", 78),
     ("电话", 145),
     ("博主状态", 180),
-    ("发帖日期", 300),
-    ("链接", 230),
-    ("备注", 340),
+    ("发帖日期", 250),
+    ("链接", 200),
+    ("备注", 130),
 ]
 
 x0, y = 70, 350
@@ -210,6 +211,7 @@ for record in records:
         record.get("platform") or "待补",
         record.get("followers") or "待补",
         record.get("engagement") or "待补",
+        record.get("postMetricsText") or "待补",
         record.get("pax") or "待补",
         record.get("phone") or "待补",
         payment_text(record) or "待补",

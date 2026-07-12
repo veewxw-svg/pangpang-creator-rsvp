@@ -1043,6 +1043,11 @@
         postTitle: postRecord.postTitle || booking.postTitle || "",
         postPublishedAt: postRecord.postPublishedAt || booking.postPublishedAt || "",
         postDateText: postRecord.postDateText || formatChineseDate(postRecord.postPublishedAt) || booking.postDateText || "",
+        postLikes: postRecord.postLikes || booking.postLikes || "",
+        postCollects: postRecord.postCollects || booking.postCollects || "",
+        postComments: postRecord.postComments || booking.postComments || "",
+        postShares: postRecord.postShares || booking.postShares || "",
+        postMetricsText: postRecord.postMetricsText || booking.postMetricsText || "",
         handle: booking.handle || postRecord.handle || "",
         name: booking.name || postRecord.name || "",
         followers: postRecord.followers || booking.followers || "",
@@ -1083,6 +1088,11 @@
         postTitle: record.postTitle || resolved.postTitle || "",
         postPublishedAt: record.postPublishedAt || resolved.publishedAt || "",
         postDateText: record.postDateText || formatChineseDate(resolved.publishedAt) || "",
+        postLikes: resolved.postLikes || record.postLikes || "",
+        postCollects: resolved.postCollects || record.postCollects || "",
+        postComments: resolved.postComments || record.postComments || "",
+        postShares: resolved.postShares || record.postShares || "",
+        postMetricsText: resolved.postMetricsText || record.postMetricsText || "",
         resolveStatus: "已自动识别",
         resolveMessage: "已打开链接并自动识别信息，请确认后保存"
       };
@@ -1128,8 +1138,42 @@
         localStorage.setItem(KEY, JSON.stringify(state.records));
         render();
         statusLine.textContent = "已连接后台记录";
+        refreshPostMetricsOnOpen();
       } catch {
         statusLine.textContent = "现在使用本机浏览器记录；如需多人共用，请保持后台服务开启";
+      }
+    }
+
+    async function refreshPostMetricsOnOpen() {
+      const targets = state.records.filter((item) => item.postUrl && normalizeStatus(item.status) === "已发布");
+      if (!targets.length) return;
+      let changed = false;
+      statusLine.textContent = `已连接后台记录，正在刷新 ${targets.length} 条帖子数据...`;
+      for (const record of targets) {
+        const resolved = await resolveProfileUrl(record.postUrl);
+        if (!resolved.ok) continue;
+        const updates = {
+          postLikes: resolved.postLikes || record.postLikes || "",
+          postCollects: resolved.postCollects || record.postCollects || "",
+          postComments: resolved.postComments || record.postComments || "",
+          postShares: resolved.postShares || record.postShares || "",
+          postMetricsText: resolved.postMetricsText || record.postMetricsText || "",
+          postPublishedAt: record.postPublishedAt || resolved.publishedAt || "",
+          postDateText: record.postDateText || formatChineseDate(resolved.publishedAt) || ""
+        };
+        Object.entries(updates).forEach(([key, value]) => {
+          if (value && record[key] !== value) {
+            record[key] = value;
+            changed = true;
+          }
+        });
+      }
+      if (changed) {
+        await saveRecords({ silent: true });
+        render();
+        statusLine.textContent = "已自动刷新帖子数据";
+      } else {
+        statusLine.textContent = "已连接后台记录";
       }
     }
 
@@ -1336,6 +1380,7 @@
         record.followers ? `粉丝 ${record.followers}` : "",
         record.engagement ? `${record.platform === "Instagram" ? "数据" : "赞藏"} ${record.engagement}` : "",
         record.postDateText ? `发帖 ${record.postDateText}` : "",
+        record.postMetricsText ? `帖子数据 ${record.postMetricsText}` : "",
         paymentText(record),
         record.phone ? `电话 ${record.phone}` : "",
         record.remarks
@@ -1425,6 +1470,7 @@
         ["主页链接", record.link ? renderLinkButton("查看主页", record.link) : "待补", true],
         ["帖子链接", record.postUrl ? renderLinkButton("查看帖子", record.postUrl) : "待补", true],
         ["发布时间", record.postDateText || formatChineseDate(record.postPublishedAt) || "待补"],
+        ["帖子数据", record.postMetricsText || "待补"],
         ["粉丝", editableFact("followers", record.followers || ""), true],
         [record.platform === "Instagram" ? "帖子 / 关注" : "赞藏 / 总赞", editableFact("engagement", record.engagement || ""), true],
         ["预约时间", [record.dateText, record.timeText].filter(Boolean).join(" ") || "待补"],
@@ -1495,7 +1541,7 @@
       <table class="report-table">
         <thead>
           <tr>
-            <th>更新</th><th>博主</th><th>链接</th><th>粉丝</th><th>数据</th><th>预约时间</th><th>发帖日期</th><th>人数</th><th>电话</th><th>博主状态</th><th>状态</th>
+            <th>更新</th><th>博主</th><th>链接</th><th>粉丝</th><th>数据</th><th>帖子数据</th><th>预约时间</th><th>发帖日期</th><th>人数</th><th>电话</th><th>博主状态</th><th>状态</th>
           </tr>
         </thead>
         <tbody>
@@ -1505,6 +1551,7 @@
             <td>${escapeHtml(linkStatus(item))}</td>
             <td>${escapeHtml(item.followers || "待补")}</td>
             <td>${escapeHtml(item.engagement || "待补")}</td>
+            <td>${escapeHtml(item.postMetricsText || "待补")}</td>
             <td>${escapeHtml([item.dateText, item.timeText].filter(Boolean).join(" ") || "待补")}</td>
             <td>${escapeHtml(item.postDateText || formatChineseDate(item.postPublishedAt) || "")}</td>
             <td>${escapeHtml(item.pax || "待补")}</td>
@@ -1530,10 +1577,10 @@
     }
 
     function exportCsv() {
-      const header = ["信息类型", "状态", "是否高亮", "日期", "星期", "时间", "发帖日期", "平台", "博主账号", "名字", "粉丝数", "数据/赞藏", "RSVP人数", "电话", "博主状态", "付费金额", "备注", "提交人", "主页链接", "帖子链接", "更新时间"];
+      const header = ["信息类型", "状态", "是否高亮", "日期", "星期", "时间", "发帖日期", "平台", "博主账号", "名字", "粉丝数", "数据/赞藏", "点赞", "收藏", "评论", "转发", "帖子数据", "RSVP人数", "电话", "博主状态", "付费金额", "备注", "提交人", "主页链接", "帖子链接", "更新时间"];
       const rows = state.records.slice().sort(sortRecords).map((item) => [
         item.type === "post" ? "发帖追踪" : "探店预约", normalizeStatus(item.status), isHighlighted(item) ? "是" : "", item.dateISO, item.weekday, item.timeText, item.postDateText || formatChineseDate(item.postPublishedAt), item.platform, item.handle, item.name, item.followers, item.engagement,
-        item.pax, item.phone, item.visitType, item.feeAmount, item.remarks, item.submitter || item.owner, item.link, item.postUrl, item.createdAt
+        item.postLikes, item.postCollects, item.postComments, item.postShares, item.postMetricsText, item.pax, item.phone, item.visitType, item.feeAmount, item.remarks, item.submitter || item.owner, item.link, item.postUrl, item.createdAt
       ]);
       const csv = [header, ...rows].map((row) => row.map(csvCell).join(",")).join("\n");
       const blob = new Blob(["\ufeff" + csv], { type: "text/csv;charset=utf-8" });
@@ -1638,14 +1685,14 @@
       }
     }
 
-    async function saveRecords() {
+    async function saveRecords(options = {}) {
       localStorage.setItem(KEY, JSON.stringify(state.records));
       if (new URLSearchParams(window.location.search).get("demo") === "1") return;
       try {
         await fetch(apiEndpoint("/api/records"), {
           method: "POST",
           headers: { "Content-Type": "application/json", "Accept": "application/json" },
-          body: JSON.stringify({ records: state.records })
+          body: JSON.stringify({ records: state.records, silent: Boolean(options.silent) })
         });
       } catch {
         // Local storage remains the fallback when the backend is offline.

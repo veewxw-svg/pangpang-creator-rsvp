@@ -50,7 +50,7 @@ createServer(async (req, res) => {
       const body = await readJsonBody(req);
       const records = Array.isArray(body.records) ? body.records : [];
       await writeRecords(records);
-      const notification = await maybeSendNotification(records);
+      const notification = body.silent ? { skipped: true, reason: "silent update" } : await maybeSendNotification(records);
       sendJson(res, { ok: true, count: records.length, reportUrl: "/api/report.png", notification });
       return;
     }
@@ -212,6 +212,11 @@ async function resolveProfile(target) {
       engagement: instagramJson.engagement || instagram.engagement || ssr.engagement || parsed.engagement,
       following: instagramJson.following || instagram.following || "",
       postCount: instagramJson.postCount || instagram.postCount || "",
+      postLikes: xhsPost.postLikes || instagram.postLikes || "",
+      postCollects: xhsPost.postCollects || "",
+      postComments: xhsPost.postComments || instagram.postComments || "",
+      postShares: xhsPost.postShares || "",
+      postMetricsText: xhsPost.postMetricsText || instagram.postMetricsText || "",
       redId: ssr.redId || "",
       description: instagramJson.description || instagram.description || xhsPost.description || ssr.description || "",
       postTitle: instagram.postTitle || xhsPost.postTitle || parsed.postTitle,
@@ -327,6 +332,8 @@ function parseInstagramMeta(meta, html, finalUrl) {
   const following = stats.following || "";
   const postCount = stats.postCount || "";
   const publishedAt = parsePublishedAt(html, meta);
+  const likeMatch = description.match(/([\d,.KMkm]+)\s+likes?/i);
+  const commentMatch = description.match(/([\d,.KMkm]+)\s+comments?/i);
   const profileUrl = handle ? `https://www.instagram.com/${handle.replace(/^@/, "")}/` : finalUrl;
 
   return {
@@ -338,6 +345,12 @@ function parseInstagramMeta(meta, html, finalUrl) {
     followers: stats.followers || "",
     following,
     postCount,
+    postLikes: likeMatch ? normalizeNumber(likeMatch[1], "") : "",
+    postComments: commentMatch ? normalizeNumber(commentMatch[1], "") : "",
+    postMetricsText: [
+      likeMatch ? `点赞 ${normalizeNumber(likeMatch[1], "")}` : "",
+      commentMatch ? `评论 ${normalizeNumber(commentMatch[1], "")}` : ""
+    ].filter(Boolean).join(" · "),
     engagement: (postCount || following) ? `${postCount || "0"} posts · ${following || "0"} following` : "",
     description: decodeEntities(bioMatch?.[1] || ""),
     postTitle: title.replace(/\s*•\s*Instagram.*/i, "").trim(),
@@ -439,6 +452,7 @@ function parseXhsPost(html, meta, finalUrl) {
   const userId = read(/"user":\{[\s\S]{0,800}?"userId":"([^"]+)"/)
     || read(/"author":\{[\s\S]{0,800}?"userId":"([^"]+)"/);
   const publishedAt = parsePublishedAt(html, meta);
+  const counts = parseXhsPostCounts(html);
   return {
     name,
     handle: userId ? `@${userId}` : "",
@@ -446,7 +460,41 @@ function parseXhsPost(html, meta, finalUrl) {
     postUrl: finalUrl,
     postTitle,
     publishedAt,
+    ...counts,
     description: meta.description || meta.ogDescription || ""
+  };
+}
+
+function parseXhsPostCounts(html) {
+  const source = decodeEntities(html);
+  const readCount = (keys) => {
+    for (const key of keys) {
+      const patterns = [
+        new RegExp(`"${key}"\\s*:\\s*"?([\\d,.万kKmM+]+)"?`, "i"),
+        new RegExp(`"${key}"\\s*:\\s*\\{[^}]*"count"\\s*:\\s*"?([\\d,.万kKmM+]+)"?`, "i")
+      ];
+      for (const pattern of patterns) {
+        const match = source.match(pattern);
+        if (match?.[1]) return normalizeSocialCount(match[1]);
+      }
+    }
+    return "";
+  };
+  const postLikes = readCount(["likedCount", "likeCount", "liked_count", "likes", "likesCount"]);
+  const postCollects = readCount(["collectedCount", "collectCount", "collected_count", "favoriteCount", "favCount", "collects"]);
+  const postComments = readCount(["commentCount", "commentsCount", "comment_count", "comments"]);
+  const postShares = readCount(["shareCount", "share_count", "shares"]);
+  return {
+    postLikes,
+    postCollects,
+    postComments,
+    postShares,
+    postMetricsText: [
+      postLikes ? `点赞 ${postLikes}` : "",
+      postCollects ? `收藏 ${postCollects}` : "",
+      postComments ? `评论 ${postComments}` : "",
+      postShares ? `转发 ${postShares}` : ""
+    ].filter(Boolean).join(" · ")
   };
 }
 
@@ -514,6 +562,15 @@ function normalizeNumber(value, unit) {
   if (/k/i.test(unit)) return String(Math.round(number * 1000)).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
   if (/m/i.test(unit)) return String(Math.round(number * 1000000)).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
   return String(Math.round(number)).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+}
+
+function normalizeSocialCount(value) {
+  const raw = String(value || "").trim();
+  const match = raw.match(/^([\d,.]+)\s*([万kKmM+]*)$/);
+  if (!match) return raw;
+  const unit = match[2] || "";
+  if (unit.includes("+")) return `${normalizeNumber(match[1], unit.replace("+", ""))}+`;
+  return normalizeNumber(match[1], unit);
 }
 
 function stripTags(html) {
