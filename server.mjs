@@ -180,21 +180,46 @@ async function resolveProfile(target) {
 
   try {
     const page = await fetchPage(target);
+    const finalUrl = page.finalUrl || target;
+    const instagramJson = await fetchInstagramProfileJson(target, finalUrl);
     if (page.status >= 400) {
+      if (instagramJson.name || instagramJson.followers || instagramJson.engagement) {
+        return {
+          ok: true,
+          finalUrl,
+          profileUrl: instagramJson.profileUrl || finalUrl,
+          postUrl: "",
+          platform: instagramJson.platform || "Instagram",
+          handle: instagramJson.handle || "",
+          name: instagramJson.name || "",
+          followers: instagramJson.followers || "",
+          engagement: instagramJson.engagement || "",
+          following: instagramJson.following || "",
+          postCount: instagramJson.postCount || "",
+          postLikes: "",
+          postCollects: "",
+          postComments: "",
+          postShares: "",
+          postMetricsText: "",
+          redId: "",
+          description: instagramJson.description || "",
+          postTitle: "",
+          publishedAt: "",
+          sourceTitle: ""
+        };
+      }
       return {
         ok: false,
-        finalUrl: page.finalUrl || target,
+        finalUrl,
         status: page.status,
-        message: `网页打开失败：HTTP ${page.status}。这个短链可能过期、不完整，或小红书没有给公开页面。`
+        message: `网页打开失败：HTTP ${page.status}。这个链接可能过期、不完整，或平台没有给公开页面。`
       };
     }
-    const finalUrl = page.finalUrl || target;
     const html = page.html;
     const meta = collectMeta(html);
     const ssr = parseXhsSsr(html);
     const xhsPost = parseXhsPost(html, meta, finalUrl);
     const instagram = parseInstagramMeta(meta, html, finalUrl);
-    const instagramJson = await fetchInstagramProfileJson(target, finalUrl);
     const isXhs = /xiaohongshu\.com|xhslink\.com/i.test(finalUrl);
     const publishedAt = instagram.publishedAt || xhsPost.publishedAt || (isXhs ? "" : parsePublishedAt(html, meta));
     const combined = [meta.title, meta.description, meta.ogTitle, meta.ogDescription, stripTags(html).slice(0, 3000)].filter(Boolean).join("\n");
