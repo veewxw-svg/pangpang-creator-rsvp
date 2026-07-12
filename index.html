@@ -1480,7 +1480,7 @@
       const date = new Date(`${record.dateISO}T12:00:00`);
       if (Number.isNaN(date.getTime())) return record.dateText || "未填日期";
       const chineseWeek = ["星期日", "星期一", "星期二", "星期三", "星期四", "星期五", "星期六"][date.getDay()];
-      const chinese = `${date.getMonth() + 1}月${date.getDate()}日 ${chineseWeek}`;
+      const chinese = `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日 ${chineseWeek}`;
       return [record.dateText, chinese].filter(Boolean).join(" · ");
     }
 
