@@ -288,7 +288,10 @@ function parseSharedText(text, finalUrl) {
   else if (/instagram\.com|instagr\.am|instagram/.test(source)) platform = "Instagram";
   const handleMatch = compact.match(/@([^\s:：,，的]+)/);
   const homeMatch = compact.match(/([^\s,，。|｜]{2,24})的个人主页/);
-  const followerMatch = compact.match(/(?:粉丝|followers?)\s*[:：]?\s*([\d,.]+)\s*([万kKmM]?)/i);
+  const followerMatch = compact.match(/(?:粉丝|followers?)\s*[:：]?\s*([\d,.]+)\s*([万kKmM]?)/i)
+    || compact.match(/([\d,.]+)\s*([万kKmM]?)\s*(?:粉丝|followers?)/i);
+  const followingMatch = compact.match(/([\d,.]+)\s*([万kKmM]?)\s*following/i);
+  const postsMatch = compact.match(/([\d,.]+)\s*([万kKmM]?)\s*posts?/i);
   const engagementMatch = compact.match(/(?:获赞与收藏|赞藏|获赞|总赞|likes?)\s*[:：]?\s*([\d,.]+)\s*([万kKmM]?)/i);
   const title = compact.split(/[-|｜]/)[0].trim().slice(0, 80);
 
@@ -299,7 +302,9 @@ function parseSharedText(text, finalUrl) {
     handle: handleMatch ? `@${handleMatch[1]}` : "",
     name: homeMatch ? homeMatch[1].replace(/^@/, "") : "",
     followers: followerMatch ? normalizeNumber(followerMatch[1], followerMatch[2]) : "",
-    engagement: engagementMatch ? normalizeNumber(engagementMatch[1], engagementMatch[2]) : "",
+    engagement: platform === "Instagram" && (postsMatch || followingMatch)
+      ? `${postsMatch ? normalizeNumber(postsMatch[1], postsMatch[2]) : "0"} posts · ${followingMatch ? normalizeNumber(followingMatch[1], followingMatch[2]) : "0"} following`
+      : (engagementMatch ? normalizeNumber(engagementMatch[1], engagementMatch[2]) : ""),
     postTitle: title
   };
 }
@@ -308,19 +313,18 @@ function parseInstagramMeta(meta, html, finalUrl) {
   if (!/instagram\.com|instagr\.am/i.test(finalUrl)) return {};
   const read = (pattern) => decodeEntities((html.match(pattern)?.[1] || "").trim());
   const title = meta.ogTitle || meta.title || read(/<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']*)["'][^>]*>/i) || read(/<title[^>]*>([\s\S]*?)<\/title>/i);
-  const description = meta.description || meta.ogDescription || read(/<meta[^>]+content=["']([^"']*)["'][^>]+name=["']description["'][^>]*>/i) || read(/<meta[^>]+property=["']og:description["'][^>]+content=["']([^"']*)["'][^>]*>/i);
-  const fallback = meta.ogDescription || description || read(/<meta[^>]+property=["']og:description["'][^>]+content=["']([^"']*)["'][^>]*>/i);
+  const description = meta.ogDescription || meta.description || read(/<meta[^>]+property=["']og:description["'][^>]+content=["']([^"']*)["'][^>]*>/i) || read(/<meta[^>]+content=["']([^"']*)["'][^>]+name=["']description["'][^>]*>/i);
+  const fallback = meta.description || description || read(/<meta[^>]+content=["']([^"']*)["'][^>]+name=["']description["'][^>]*>/i);
   const isPost = /\/(?:p|reel|reels)\//i.test(finalUrl);
   const titleMatch = title.match(/^(.+?)\s+\(@([^)]+)\)/);
   const descMatch = description.match(/-\s*(.+?)\s+\(@([^)]+)\)\s+on Instagram/i);
   const postTitleMatch = title.match(/^(.+?)\s+on Instagram\s*:/i) || description.match(/-\s*(.+?)\s+on Instagram\s*:/i);
-  const statsMatch = (description.match(/([\d,.KMkm]+)\s+Followers,\s+([\d,.KMkm]+)\s+Following,\s+([\d,.KMkm]+)\s+Posts/i)
-    || fallback.match(/([\d,.KMkm]+)\s+Followers,\s+([\d,.KMkm]+)\s+Following,\s+([\d,.KMkm]+)\s+Posts/i));
+  const stats = readInstagramStats([description, fallback, title, stripTags(html).slice(0, 3000)].filter(Boolean));
   const bioMatch = description.match(/on Instagram:\s*"([^"]*)"/i);
   const urlHandle = finalUrl.match(/instagram\.com\/([^/?#]+)/i)?.[1] || "";
   const handle = titleMatch?.[2] || descMatch?.[2] || urlHandle;
-  const following = statsMatch ? normalizeNumber(statsMatch[2], "") : "";
-  const postCount = statsMatch ? normalizeNumber(statsMatch[3], "") : "";
+  const following = stats.following || "";
+  const postCount = stats.postCount || "";
   const publishedAt = parsePublishedAt(html, meta);
   const profileUrl = handle ? `https://www.instagram.com/${handle.replace(/^@/, "")}/` : finalUrl;
 
@@ -330,14 +334,35 @@ function parseInstagramMeta(meta, html, finalUrl) {
     postUrl: isPost ? finalUrl : "",
     handle: handle ? `@${handle.replace(/^@/, "")}` : "",
     name: decodeEntities(titleMatch?.[1] || descMatch?.[1] || postTitleMatch?.[1] || ""),
-    followers: statsMatch ? normalizeNumber(statsMatch[1], "") : "",
+    followers: stats.followers || "",
     following,
     postCount,
-    engagement: statsMatch ? `${postCount} posts · ${following} following` : "",
+    engagement: (postCount || following) ? `${postCount || "0"} posts · ${following || "0"} following` : "",
     description: decodeEntities(bioMatch?.[1] || ""),
     postTitle: title.replace(/\s*•\s*Instagram.*/i, "").trim(),
     publishedAt
   };
+}
+
+function readInstagramStats(sources) {
+  const sourceList = Array.isArray(sources) ? sources : [sources];
+  let compact = "";
+  const readLabel = (label) => {
+    const after = compact.match(new RegExp(`([\\d,.]+)\\s*([KkMm]?)\\s*${label}`, "i"));
+    const before = compact.match(new RegExp(`${label}\\s*[:：]?\\s*([\\d,.]+)\\s*([KkMm]?)`, "i"));
+    const match = after || before;
+    return match ? normalizeNumber(match[1], match[2]) : "";
+  };
+  for (const source of sourceList) {
+    compact = String(source || "").replace(/\s+/g, " ");
+    const stats = {
+      followers: readLabel("followers?"),
+      following: readLabel("following"),
+      postCount: readLabel("posts?")
+    };
+    if ([stats.followers, stats.following, stats.postCount].filter(Boolean).length >= 2) return stats;
+  }
+  return { followers: "", following: "", postCount: "" };
 }
 
 function parseXhsPost(html, meta, finalUrl) {

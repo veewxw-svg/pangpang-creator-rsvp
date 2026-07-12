@@ -1118,10 +1118,15 @@
         if (urlMatch && !["share", "explore", "reel", "p"].includes(urlMatch[1])) handle = "@" + decodeURIComponent(urlMatch[1]);
       }
 
-      const followerMatch = raw.match(/(?:粉丝|followers?)\s*[:：]?\s*([\d,.]+)\s*([万kKmM]?)/i);
+      const followerMatch = raw.match(/(?:粉丝|followers?)\s*[:：]?\s*([\d,.]+)\s*([万kKmM]?)/i)
+        || raw.match(/([\d,.]+)\s*([万kKmM]?)\s*(?:粉丝|followers?)/i);
       const followers = followerMatch ? normalizeNumber(followerMatch[1], followerMatch[2]) : "";
+      const followingMatch = raw.match(/([\d,.]+)\s*([万kKmM]?)\s*following/i);
+      const postsMatch = raw.match(/([\d,.]+)\s*([万kKmM]?)\s*posts?/i);
       const engagementMatch = raw.match(/(?:获赞与收藏|赞藏|获赞|likes?)\s*[:：]?\s*([\d,.]+)\s*([万kKmM]?)/i);
-      const engagement = engagementMatch ? normalizeNumber(engagementMatch[1], engagementMatch[2]) : "";
+      const engagement = platform === "Instagram" && (postsMatch || followingMatch)
+        ? `${postsMatch ? normalizeNumber(postsMatch[1], postsMatch[2]) : "0"} posts · ${followingMatch ? normalizeNumber(followingMatch[1], followingMatch[2]) : "0"} following`
+        : (engagementMatch ? normalizeNumber(engagementMatch[1], engagementMatch[2]) : "");
       let name = "";
       const nameMatch = compact.match(/(?:名字|Name)\s*[:：]\s*([^\s,，]+)/i);
       if (nameMatch) name = nameMatch[1];
@@ -1157,10 +1162,23 @@
       let day = "";
       const ymd = text.match(/(20\d{2})[./-](\d{1,2})[./-](\d{1,2})/);
       const md = text.match(/(\d{1,2})\s*(?:[./-]|月)\s*(\d{1,2})\s*(?:号|日)?/);
+      const months = {
+        jan: 1, january: 1, feb: 2, february: 2, mar: 3, march: 3, apr: 4, april: 4,
+        may: 5, jun: 6, june: 6, jul: 7, july: 7, aug: 8, august: 8, sep: 9, sept: 9,
+        september: 9, oct: 10, october: 10, nov: 11, november: 11, dec: 12, december: 12
+      };
+      const dmy = text.match(/\b(\d{1,2})\s*(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t)?(?:ember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\b/i);
+      const mdy = text.match(/\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t)?(?:ember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s*(\d{1,2})\b/i);
       if (ymd) {
         year = Number(ymd[1]);
         month = Number(ymd[2]);
         day = Number(ymd[3]);
+      } else if (dmy) {
+        day = Number(dmy[1]);
+        month = months[dmy[2].toLowerCase()];
+      } else if (mdy) {
+        month = months[mdy[1].toLowerCase()];
+        day = Number(mdy[2]);
       } else if (md) {
         month = Number(md[1]);
         day = Number(md[2]);
