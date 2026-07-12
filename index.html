@@ -1336,7 +1336,7 @@
       }
       const grouped = groupByDate(records);
       recordList.innerHTML = grouped.map(([dateKey, items]) => {
-        const title = items[0].dateText || "未填日期";
+        const title = dateGroupTitle(items[0]);
         return `<section class="day">
           <div class="day-title">${escapeHtml(title)}<span>${items.length} 条</span></div>
           ${items.map(renderRecord).join("")}
@@ -1475,6 +1475,15 @@
         groups.get(key).push(record);
       });
       return Array.from(groups.entries());
+    }
+
+    function dateGroupTitle(record) {
+      if (!record?.dateISO) return record?.dateText || "未填日期";
+      const date = new Date(`${record.dateISO}T12:00:00`);
+      if (Number.isNaN(date.getTime())) return record.dateText || "未填日期";
+      const chineseWeek = ["星期日", "星期一", "星期二", "星期三", "星期四", "星期五", "星期六"][date.getDay()];
+      const chinese = `${date.getMonth() + 1}月${date.getDate()}日 ${chineseWeek}`;
+      return [record.dateText, chinese].filter(Boolean).join(" · ");
     }
 
     function renderReview(record) {
