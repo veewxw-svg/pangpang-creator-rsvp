@@ -1,0 +1,19 @@
+{
+  "name": "PangPang 博主探店预约",
+  "short_name": "探店预约",
+  "description": "接收博主主页和帖子分享，生成预约、发帖追踪和报表。",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f5f5f7",
+  "theme_color": "#f5f5f7",
+  "share_target": {
+    "action": "./index.html",
+    "method": "GET",
+    "params": {
+      "title": "title",
+      "text": "text",
+      "url": "url"
+    }
+  }
+}

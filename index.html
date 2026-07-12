@@ -1,0 +1,1601 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PangPang 博主探店预约</title>
+  <meta name="theme-color" content="#f5f5f7">
+  <link rel="manifest" href="manifest.webmanifest">
+  <style>
+    :root {
+      --bg: #f5f5f7;
+      --panel: #ffffff;
+      --ink: #1d1d1f;
+      --muted: #6e6e73;
+      --soft: #86868b;
+      --line: #d2d2d7;
+      --line-soft: #ededf0;
+      --brand: #0071e3;
+      --brand-dark: #0066cc;
+      --green: #248a3d;
+      --yellow: #a86f00;
+      --blue: #0071e3;
+      --gray: #6e6e73;
+      --red: #d70015;
+      --shadow: 0 1px 2px rgba(0, 0, 0, .03), 0 20px 40px rgba(0, 0, 0, .04);
+      --radius: 8px;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      letter-spacing: 0;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    button, input, textarea, select { font: inherit; }
+    button { -webkit-tap-highlight-color: transparent; }
+    button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible {
+      outline: 2px solid rgba(0, 113, 227, .35);
+      outline-offset: 2px;
+    }
+
+    .app {
+      min-height: 100vh;
+      width: min(1180px, 100%);
+      margin: 0 auto;
+      padding: 0 22px 34px;
+    }
+
+    .masthead {
+      padding: 0 0 30px;
+    }
+
+    .nav {
+      position: sticky;
+      top: 0;
+      z-index: 5;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      min-height: 52px;
+      padding: 0;
+      background: rgba(245, 245, 247, .78);
+      backdrop-filter: blur(20px);
+      border-bottom: 1px solid rgba(0, 0, 0, .06);
+    }
+
+    .wordmark {
+      color: var(--ink);
+      font-size: 15px;
+      font-weight: 650;
+    }
+
+    .hero {
+      max-width: 760px;
+      margin: 0 auto;
+      padding: 52px 0 18px;
+      text-align: center;
+    }
+
+    .eyebrow {
+      margin-bottom: 12px;
+      color: var(--soft);
+      font-size: 13px;
+      font-weight: 600;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(44px, 7vw, 76px);
+      line-height: 1.04;
+      font-weight: 700;
+      letter-spacing: 0;
+    }
+
+    .subtitle {
+      margin: 14px auto 0;
+      max-width: 560px;
+      color: var(--muted);
+      font-size: clamp(18px, 2.2vw, 24px);
+      line-height: 1.35;
+    }
+
+    .toolbar {
+      display: flex;
+      gap: 10px;
+      flex: 0 0 auto;
+    }
+
+    .icon-btn {
+      width: 36px;
+      height: 36px;
+      border: 1px solid rgba(0, 0, 0, .08);
+      border-radius: 999px;
+      background: rgba(255, 255, 255, .72);
+      color: var(--ink);
+      box-shadow: none;
+      display: grid;
+      place-items: center;
+      cursor: pointer;
+      transition: transform .16s ease, background .16s ease, border-color .16s ease;
+    }
+
+    .icon-btn:hover { background: #fbfbfd; border-color: rgba(0, 0, 0, .14); }
+    .icon-btn:active { transform: scale(.97); }
+
+    .icon-btn svg {
+      width: 18px;
+      height: 18px;
+      stroke: currentColor;
+      stroke-width: 2;
+      fill: none;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: minmax(320px, 380px) minmax(0, 1fr);
+      gap: 22px;
+      align-items: start;
+    }
+
+    .panel {
+      background: var(--panel);
+      border: 1px solid rgba(0, 0, 0, .08);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+    }
+
+    .form-panel {
+      position: sticky;
+      top: 68px;
+      padding: 18px 20px;
+    }
+
+    .form-title {
+      margin: 0 0 18px;
+      font-size: 21px;
+      line-height: 1.2;
+      font-weight: 650;
+    }
+
+    label {
+      display: block;
+      margin: 0 0 8px;
+      color: var(--soft);
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 0;
+    }
+
+    textarea, input, select {
+      width: 100%;
+      border: 1px solid transparent;
+      border-radius: var(--radius);
+      background: #f5f5f7;
+      color: var(--ink);
+      outline: 0;
+      padding: 13px 14px;
+      transition: background .16s ease, border-color .16s ease, box-shadow .16s ease;
+    }
+
+    textarea:focus, input:focus, select:focus {
+      border-color: var(--brand);
+      background: #fff;
+      box-shadow: 0 0 0 4px rgba(0, 113, 227, .14);
+    }
+
+    textarea {
+      min-height: 92px;
+      resize: vertical;
+      line-height: 1.45;
+    }
+
+    .field { margin-bottom: 12px; }
+
+    .row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+
+    .row.single-row { grid-template-columns: 1fr; }
+
+    .primary {
+      width: 100%;
+      height: 48px;
+      border: 0;
+      border-radius: 999px;
+      background: var(--brand);
+      color: #fff;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background .16s ease, transform .16s ease;
+    }
+
+    .primary:hover { background: var(--brand-dark); }
+    .primary:active { transform: scale(.99); }
+
+    .secondary {
+      min-height: 40px;
+      border: 1px solid rgba(0, 0, 0, .08);
+      border-radius: 999px;
+      background: #f5f5f7;
+      color: var(--ink);
+      font-weight: 600;
+      cursor: pointer;
+      padding: 9px 12px;
+      transition: background .16s ease, border-color .16s ease;
+    }
+
+    .secondary:hover { background: #fff; border-color: rgba(0, 0, 0, .14); }
+
+    .quick {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin-top: 8px;
+    }
+
+    .mode-switch {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+      padding: 4px;
+      margin-bottom: 16px;
+      border-radius: 999px;
+      background: #f5f5f7;
+    }
+
+    .mode-switch button {
+      min-height: 36px;
+      border: 0;
+      border-radius: 999px;
+      background: transparent;
+      color: var(--muted);
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    .mode-switch button.active {
+      background: #fff;
+      color: var(--ink);
+      box-shadow: 0 1px 3px rgba(0, 0, 0, .08);
+    }
+
+    .status-line {
+      margin-top: 10px;
+      min-height: 20px;
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 500;
+    }
+
+    .summary {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 0;
+      margin-bottom: 14px;
+      background: #fff;
+      border: 1px solid rgba(0, 0, 0, .08);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+
+    .metric {
+      min-width: 0;
+      padding: 18px 16px;
+      background: transparent;
+      border-right: 1px solid var(--line-soft);
+    }
+
+    .metric:last-child { border-right: 0; }
+
+    .metric strong {
+      display: block;
+      font-size: 30px;
+      line-height: 1;
+      font-weight: 650;
+    }
+
+    .metric span {
+      display: block;
+      margin-top: 6px;
+      color: var(--soft);
+      font-size: 12px;
+      font-weight: 500;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .list-panel {
+      padding: 0;
+      overflow: hidden;
+    }
+
+    .review-panel, .report-panel {
+      margin-top: 14px;
+      padding: 18px;
+    }
+
+    .review-panel.hidden, .report-panel.hidden { display: none; }
+
+    .review-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+
+    .review-head h2, .report-head h2 {
+      margin: 0;
+      font-size: 24px;
+      line-height: 1.15;
+      font-weight: 650;
+    }
+
+    .review-head p, .report-head p {
+      margin: 6px 0 0;
+      color: var(--muted);
+      line-height: 1.45;
+    }
+
+    .review-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .fact {
+      min-height: 78px;
+      padding: 12px;
+      border-radius: var(--radius);
+      background: #f5f5f7;
+    }
+
+    .fact span {
+      display: block;
+      color: var(--soft);
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    .fact b {
+      display: block;
+      margin-top: 7px;
+      color: var(--ink);
+      font-size: 16px;
+      font-weight: 650;
+      line-height: 1.35;
+      overflow-wrap: anywhere;
+    }
+
+    .review-actions {
+      display: flex;
+      gap: 8px;
+      margin-top: 16px;
+    }
+
+    .review-actions .primary, .review-actions .secondary { width: auto; flex: 1; }
+
+    .record.new-update {
+      background: linear-gradient(90deg, rgba(0, 113, 227, .08), #fff 18%);
+    }
+
+    .record.post-update {
+      background: linear-gradient(90deg, rgba(36, 138, 61, .09), #fff 18%);
+    }
+
+    .report-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+
+    .report-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+
+    .report-table th, .report-table td {
+      padding: 10px 8px;
+      border-bottom: 1px solid var(--line-soft);
+      text-align: left;
+      vertical-align: top;
+      overflow-wrap: anywhere;
+    }
+
+    .report-table th {
+      color: var(--soft);
+      font-weight: 650;
+    }
+
+    .report-table tr.new-row td {
+      background: rgba(0, 113, 227, .08);
+    }
+
+    .report-table tr.post-row td {
+      background: rgba(36, 138, 61, .08);
+    }
+
+    .list-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 16px 18px;
+      border-bottom: 1px solid var(--line-soft);
+    }
+
+    .list-head strong { font-size: 21px; font-weight: 650; }
+
+    .filters {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .filters select {
+      width: auto;
+      min-width: 104px;
+      padding: 8px 30px 8px 12px;
+      background: #fff;
+      border-color: var(--line-soft);
+    }
+
+    .day {
+      border-bottom: 1px solid var(--line-soft);
+    }
+
+    .day-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 12px 16px;
+      background: #f5f5f7;
+      color: var(--ink);
+      font-weight: 650;
+      border-bottom: 1px solid var(--line-soft);
+    }
+
+    .day-title span {
+      font-size: 13px;
+      color: var(--soft);
+      flex: 0 0 auto;
+      font-weight: 500;
+    }
+
+    .record {
+      display: grid;
+      grid-template-columns: 92px minmax(0, 1fr) 106px;
+      gap: 18px;
+      padding: 18px;
+      border-top: 1px solid var(--line-soft);
+      background: #fff;
+    }
+
+    .time {
+      font-size: 20px;
+      font-weight: 650;
+    }
+
+    .pax {
+      margin-top: 5px;
+      color: var(--soft);
+      font-size: 13px;
+    }
+
+    .creator {
+      min-width: 0;
+    }
+
+    .creator b {
+      display: block;
+      overflow-wrap: anywhere;
+      font-size: 17px;
+      font-weight: 650;
+    }
+
+    .meta {
+      margin-top: 6px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.45;
+      overflow-wrap: anywhere;
+    }
+
+    .link-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 8px;
+    }
+
+    .link-pill {
+      display: inline-flex;
+      align-items: center;
+      min-height: 28px;
+      padding: 5px 10px;
+      border-radius: 999px;
+      background: #f5f5f7;
+      border: 1px solid rgba(0, 0, 0, .08);
+      color: var(--brand);
+      font-size: 13px;
+      font-weight: 600;
+      text-decoration: none;
+    }
+
+    .link-pill:hover { background: #fff; border-color: rgba(0, 113, 227, .28); }
+
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      min-height: 24px;
+      margin-top: 8px;
+      padding: 3px 8px;
+      border-radius: 999px;
+      color: var(--ink);
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    .chip.新增 { background: rgba(36, 138, 61, .12); color: var(--green); }
+    .chip.修改 { background: rgba(168, 111, 0, .12); color: var(--yellow); }
+    .chip.取消 { background: rgba(215, 0, 21, .1); color: var(--red); }
+    .chip.已发布 { background: rgba(88, 86, 214, .12); color: #5856d6; }
+
+    .actions {
+      display: grid;
+      gap: 8px;
+      align-content: start;
+    }
+
+    .actions button, .actions select {
+      min-height: 34px;
+      border: 1px solid rgba(0, 0, 0, .08);
+      border-radius: 999px;
+      background: #f5f5f7;
+      padding: 6px 8px;
+      color: var(--ink);
+      font-size: 13px;
+      font-weight: 600;
+    }
+
+    .actions button:hover { background: #fff; }
+
+    .empty {
+      padding: 28px 14px;
+      color: var(--muted);
+      text-align: center;
+    }
+
+    .toast {
+      position: fixed;
+      left: 50%;
+      bottom: 18px;
+      transform: translateX(-50%) translateY(16px);
+      max-width: calc(100vw - 28px);
+      padding: 10px 14px;
+      border-radius: 999px;
+      background: #111827;
+      color: #fff;
+      opacity: 0;
+      pointer-events: none;
+      transition: .18s ease;
+      font-size: 14px;
+      z-index: 20;
+    }
+
+    .toast.show {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+    }
+
+    @media (max-width: 860px) {
+      .app { padding: 0 14px 28px; }
+      .hero { padding-top: 36px; }
+      .grid { grid-template-columns: 1fr; }
+      .form-panel { position: static; }
+      .summary { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      .metric { border-bottom: 1px solid var(--line-soft); }
+      .metric:nth-child(3n) { border-right: 0; }
+      .record { grid-template-columns: 70px minmax(0, 1fr); }
+      .review-grid { grid-template-columns: 1fr; }
+      .report-panel { overflow-x: auto; }
+      .actions {
+        grid-column: 1 / -1;
+        grid-template-columns: repeat(3, 1fr);
+      }
+    }
+
+    @media (max-width: 430px) {
+      .nav { min-height: 48px; }
+      .hero { padding-top: 28px; text-align: left; }
+      h1 { font-size: 42px; }
+      .subtitle { font-size: 19px; }
+      .toolbar { gap: 6px; }
+      .icon-btn { width: 38px; height: 38px; }
+      .row { grid-template-columns: 1fr; }
+      .summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .metric:nth-child(3n) { border-right: 1px solid var(--line-soft); }
+      .metric:nth-child(2n) { border-right: 0; }
+      .list-head { align-items: flex-start; flex-direction: column; }
+      .filters { width: 100%; }
+      .filters select { width: 100%; }
+      .actions { grid-template-columns: 1fr 1fr; }
+      .review-head, .report-head, .review-actions { flex-direction: column; }
+      .review-actions .primary, .review-actions .secondary { width: 100%; }
+    }
+
+    @media print {
+      body { background: #fff; }
+      .masthead, .form-panel, .summary, .list-panel, .toast { display: none !important; }
+      .app { width: 100%; padding: 0; }
+      .grid { display: block; }
+      .report-panel.hidden { display: block; }
+      .report-panel {
+        display: block !important;
+        margin: 0;
+        padding: 0;
+        border: 0;
+        box-shadow: none;
+      }
+      .report-head button { display: none; }
+      .report-table th, .report-table td { border-color: #d2d2d7; }
+    }
+  </style>
+</head>
+<body>
+  <main class="app">
+    <header class="masthead">
+      <div class="nav">
+        <div class="wordmark">PangPang</div>
+        <div class="toolbar">
+          <button class="icon-btn" id="exportBtn" title="导出 CSV" aria-label="导出 CSV">
+            <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><path d="M7 10l5 5 5-5"></path><path d="M12 15V3"></path></svg>
+          </button>
+          <button class="icon-btn" id="printReportBtn" title="查看邮件 PNG" aria-label="查看邮件 PNG">
+            <svg viewBox="0 0 24 24"><path d="M6 9V2h12v7"></path><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><path d="M6 14h12v8H6z"></path></svg>
+          </button>
+        </div>
+      </div>
+      <div class="hero">
+        <div class="eyebrow">Creator Visit RSVP</div>
+        <h1>博主探店预约</h1>
+        <div class="subtitle">清楚记录每一次预约和发帖更新。</div>
+      </div>
+    </header>
+
+    <section class="grid">
+      <form class="panel form-panel" id="bookingForm">
+        <h2 class="form-title" id="formTitle">新预约</h2>
+        <div class="mode-switch" aria-label="信息类型">
+          <button class="active" type="button" data-mode="booking">约博主</button>
+          <button type="button" data-mode="post">追踪发帖</button>
+        </div>
+        <div class="field">
+          <label for="profileText" id="profileLabel">博主主页链接</label>
+          <textarea id="profileText" placeholder="https://www.instagram.com/username/"></textarea>
+        </div>
+
+        <div class="field" id="bookingField">
+          <label for="bookingText">时间人数电话</label>
+          <textarea id="bookingText" placeholder="7.15号 2pax 7pm 88322691"></textarea>
+        </div>
+
+        <div class="row">
+          <div class="field">
+            <label for="owner">提交人</label>
+            <select id="owner">
+              <option value="" selected></option>
+              <option>中文板块营销专员</option>
+              <option>英文板块营销专员</option>
+            </select>
+          </div>
+          <div class="field" id="menuField">
+            <label for="menu">套餐</label>
+            <select id="menu">
+              <option value="" selected></option>
+              <option>晚餐推广菜单</option>
+              <option>午餐推广菜单</option>
+              <option>待确认</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="field">
+          <label for="remarks">备注</label>
+          <input id="remarks" placeholder="2A + 2C / 改时间 / 不吃辣 / 发帖提醒">
+        </div>
+
+        <button class="primary" type="submit" id="submitBtn">识别并确认</button>
+        <div class="quick">
+          <button class="secondary" type="button" id="clearInputBtn">清空输入</button>
+        </div>
+        <div class="status-line" id="statusLine"></div>
+      </form>
+
+      <section>
+        <div class="summary" id="summary"></div>
+        <div class="panel review-panel hidden" id="reviewPanel"></div>
+        <div class="panel list-panel">
+          <div class="list-head">
+            <strong>预约记录</strong>
+            <div class="filters">
+              <select id="ownerFilter" aria-label="筛选提交人">
+                <option value="all">全部提交人</option>
+                <option>中文板块营销专员</option>
+                <option>英文板块营销专员</option>
+              </select>
+              <select id="statusFilter" aria-label="筛选状态">
+                <option value="all">全部状态</option>
+                <option>新增</option>
+                <option>取消</option>
+                <option>已发布</option>
+              </select>
+            </div>
+          </div>
+          <div id="recordList"></div>
+        </div>
+        <div class="panel report-panel hidden" id="reportPanel"></div>
+      </section>
+    </section>
+  </main>
+  <div class="toast" id="toast"></div>
+
+  <script>
+    const KEY = "pangpang_kol_bookings_v1";
+    const weekdays = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+    const state = {
+      records: loadRecords(),
+      pendingRecord: null,
+      editingId: "",
+      mode: "booking"
+    };
+
+    const $ = (id) => document.getElementById(id);
+    const form = $("bookingForm");
+    const formTitle = $("formTitle");
+    const submitBtn = $("submitBtn");
+    const profileLabel = $("profileLabel");
+    const profileText = $("profileText");
+    const bookingField = $("bookingField");
+    const bookingText = $("bookingText");
+    const owner = $("owner");
+    const menuField = $("menuField");
+    const menu = $("menu");
+    const remarks = $("remarks");
+    const statusLine = $("statusLine");
+    const recordList = $("recordList");
+    const summary = $("summary");
+    const reviewPanel = $("reviewPanel");
+    const reportPanel = $("reportPanel");
+    const ownerFilter = $("ownerFilter");
+    const statusFilter = $("statusFilter");
+
+    if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
+      navigator.serviceWorker.register("./sw.js").catch(() => {});
+    }
+
+    hydrateFromShareParams();
+    const demoLoaded = hydrateDemoRecords();
+    render();
+    if (!demoLoaded) hydrateServerRecords();
+
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      statusLine.textContent = state.editingId ? "正在更新这条记录..." : "正在打开链接识别博主信息...";
+      const existing = state.editingId ? state.records.find((item) => item.id === state.editingId) : null;
+      const record = existing
+        ? { ...existing, ...buildRecord(false), id: existing.id, createdAt: existing.createdAt, highlightUntil: existing.highlightUntil }
+        : buildRecord(false);
+      const enriched = await enrichRecord(record);
+      if (!state.editingId && enriched.type === "post" && enriched.ok !== false) {
+        const matched = findMatchingBooking(enriched);
+        if (!matched) {
+          state.pendingRecord = null;
+          reviewPanel.classList.add("hidden");
+          statusLine.textContent = "没有找到对应的原预约。请先确认这位博主已经在预约记录里，或点原预约的编辑来更新。";
+          return;
+        }
+        state.editingId = matched.id;
+        state.pendingRecord = mergePostIntoBooking(matched, enriched);
+      } else {
+        state.pendingRecord = enriched;
+      }
+      statusLine.textContent = state.pendingRecord.resolveMessage || "已识别信息，请在右侧确认后保存";
+      renderReview(state.pendingRecord);
+    });
+
+    document.querySelectorAll("[data-mode]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        setMode(btn.dataset.mode);
+      });
+    });
+
+    $("clearInputBtn").addEventListener("click", () => {
+      resetForm();
+      statusLine.textContent = "";
+    });
+
+    $("exportBtn").addEventListener("click", exportCsv);
+    $("printReportBtn").addEventListener("click", openReportPng);
+    ownerFilter.addEventListener("change", render);
+    statusFilter.addEventListener("change", render);
+
+    reviewPanel.addEventListener("click", (event) => {
+      const action = event.target.closest("[data-review-action]")?.dataset.reviewAction;
+      if (!action) return;
+      if (action === "back") {
+        reviewPanel.classList.add("hidden");
+        statusLine.textContent = "可以继续修改后再确认";
+        return;
+      }
+      if (action === "save" && state.pendingRecord) {
+        const editingId = state.editingId;
+        const record = editingId
+          ? { ...state.pendingRecord, id: editingId, createdAt: new Date().toISOString(), highlightUntil: Date.now() + 72 * 60 * 60 * 1000 }
+          : { ...state.pendingRecord, id: String(Date.now()), createdAt: new Date().toISOString(), highlightUntil: Date.now() + 72 * 60 * 60 * 1000 };
+        record.status = record.postUrl || record.type === "post" ? "已发布" : normalizeStatus(record.status);
+        if (editingId) {
+          state.records = state.records.map((item) => item.id === editingId ? record : item);
+        } else {
+          state.records.unshift(record);
+        }
+        state.pendingRecord = null;
+        saveRecords();
+        resetForm();
+        statusLine.textContent = `${record.status === "已发布" ? "已更新为已发布" : (editingId ? "已更新" : "已保存")}：${record.dateText || "未填日期"} ${record.timeText || "未填时间"} ${displayCreatorName(record)}`;
+        reviewPanel.classList.add("hidden");
+        render();
+      }
+    });
+
+    function buildRecord(withId = true) {
+      const profile = parseProfile(profileText.value);
+      const booking = state.mode === "post" ? {} : parseBooking(bookingText.value);
+      return {
+        id: withId ? String(Date.now()) : "draft",
+        createdAt: new Date().toISOString(),
+        type: state.mode,
+        status: state.mode === "post" ? "已发布" : "新增",
+        owner: owner.value,
+        submitter: owner.value,
+        reportLang: owner.value.includes("英文") ? "英文" : owner.value.includes("中文") ? "中文" : "",
+        platform: profile.platform || "待确认",
+        link: profile.link || "",
+        postUrl: state.mode === "post" ? profile.link || "" : "",
+        postTitle: state.mode === "post" ? profile.postTitle || profile.name || "" : "",
+        postPublishedAt: "",
+        postDateText: "",
+        handle: profile.handle || "",
+        name: profile.name || "",
+        followers: profile.followers || "",
+        engagement: profile.engagement || "",
+        bio: profile.bio || "",
+        dateISO: booking.dateISO || "",
+        dateText: booking.dateText || "",
+        weekday: booking.weekday || "",
+        timeText: booking.timeText || "",
+        pax: booking.pax || "",
+        phone: booking.phone || "",
+        menu: state.mode === "post" ? "" : menu.value,
+        remarks: remarks.value.trim()
+      };
+    }
+
+    function setMode(mode) {
+      state.mode = mode;
+      document.querySelectorAll("[data-mode]").forEach((item) => item.classList.toggle("active", item.dataset.mode === mode));
+      const isPost = state.mode === "post";
+      formTitle.textContent = state.editingId ? (isPost ? "修改发帖记录" : "修改预约") : (isPost ? "新发帖记录" : "新预约");
+      submitBtn.textContent = state.editingId ? "保存修改" : (isPost ? "识别发帖并确认" : "识别并确认");
+      profileLabel.textContent = isPost ? "帖子链接" : "博主主页链接";
+      profileText.placeholder = isPost ? "https://www.instagram.com/p/..." : "https://www.instagram.com/username/";
+      bookingField.style.display = isPost ? "none" : "";
+      menuField.style.display = isPost ? "none" : "";
+    }
+
+    function resetForm() {
+      profileText.value = "";
+      bookingText.value = "";
+      owner.value = "";
+      menu.value = "";
+      remarks.value = "";
+      state.pendingRecord = null;
+      state.editingId = "";
+      setMode("booking");
+      reviewPanel.classList.add("hidden");
+    }
+
+    function startEditRecord(id) {
+      const record = state.records.find((item) => item.id === id);
+      if (!record) return;
+      state.editingId = id;
+      state.pendingRecord = null;
+      setMode(record.type || "booking");
+      profileText.value = record.type === "post" ? (record.postUrl || record.link || "") : (record.link || "");
+      bookingText.value = [
+        record.dateISO || record.dateText || "",
+        record.timeText || "",
+        record.pax ? `${record.pax} pax` : "",
+        record.phone || ""
+      ].filter(Boolean).join(" ");
+      owner.value = record.owner || record.submitter || "";
+      menu.value = record.menu || "";
+      remarks.value = record.remarks || "";
+      statusLine.textContent = "正在修改这一条，改好后点保存修改";
+      reviewPanel.classList.add("hidden");
+      form.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+
+    function findMatchingBooking(postRecord) {
+      return state.records.find((item) => {
+        if (item.id === state.editingId || normalizeStatus(item.status) === "取消") return false;
+        if (item.type === "post") return false;
+        return sameCreator(item, postRecord);
+      });
+    }
+
+    function sameCreator(a, b) {
+      const handleA = normalizeIdentity(a.handle);
+      const handleB = normalizeIdentity(b.handle);
+      if (handleA && handleB && handleA === handleB) return true;
+      const nameA = normalizeIdentity(a.name);
+      const nameB = normalizeIdentity(b.name);
+      if (nameA && nameB && nameA === nameB) return true;
+      const linkA = normalizeProfileLink(a.link);
+      const linkB = normalizeProfileLink(b.link);
+      return Boolean(linkA && linkB && linkA === linkB);
+    }
+
+    function normalizeIdentity(value) {
+      return String(value || "").replace(/^@/, "").replace(/\s+/g, "").toLowerCase();
+    }
+
+    function normalizeProfileLink(value) {
+      try {
+        const url = new URL(value);
+        return `${url.hostname.replace(/^www\./, "")}${url.pathname}`.replace(/\/$/, "").toLowerCase();
+      } catch {
+        return "";
+      }
+    }
+
+    function formatChineseDate(value) {
+      if (!value) return "";
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return "";
+      const week = ["星期日", "星期一", "星期二", "星期三", "星期四", "星期五", "星期六"][date.getDay()];
+      return `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日 ${week}`;
+    }
+
+    function displayCreatorName(record) {
+      return record.name || readableHandle(record.handle) || "未识别账号";
+    }
+
+    function readableHandle(handle) {
+      const clean = String(handle || "").replace(/^@/, "");
+      if (!clean) return "";
+      if (/^[a-f0-9]{20,}$/i.test(clean)) return "";
+      return `@${clean}`;
+    }
+
+    function mergePostIntoBooking(booking, postRecord) {
+      return {
+        ...booking,
+        platform: postRecord.platform || booking.platform,
+        link: booking.link || postRecord.link,
+        postUrl: postRecord.postUrl || postRecord.link || booking.postUrl,
+        postTitle: postRecord.postTitle || booking.postTitle || "",
+        postPublishedAt: postRecord.postPublishedAt || booking.postPublishedAt || "",
+        postDateText: postRecord.postDateText || formatChineseDate(postRecord.postPublishedAt) || booking.postDateText || "",
+        handle: booking.handle || postRecord.handle || "",
+        name: booking.name || postRecord.name || "",
+        followers: postRecord.followers || booking.followers || "",
+        engagement: postRecord.engagement || booking.engagement || "",
+        status: "已发布",
+        remarks: postRecord.remarks || booking.remarks || "",
+        resolveStatus: "已匹配原预约",
+        resolveMessage: "已找到原预约，会更新在同一条记录里，请确认后保存"
+      };
+    }
+
+    async function enrichRecord(record) {
+      if (!record.link) {
+        return { ...record, resolveMessage: record.type === "post" ? "没有检测到帖子链接，请补充帖子链接" : "没有检测到博主主页链接，请补充主页链接" };
+      }
+      const needsProfile = !record.name || !record.handle || !record.followers || !record.engagement || !record.bio;
+      if (!needsProfile) return { ...record, resolveMessage: "已从分享文字识别信息，请确认后保存" };
+
+      const resolved = await resolveProfileUrl(record.link);
+      if (!resolved.ok) {
+        return {
+          ...record,
+          resolveStatus: "需要解析服务",
+          resolveMessage: resolved.message
+        };
+      }
+
+      const merged = {
+        ...record,
+        platform: resolved.platform || record.platform,
+        link: resolved.profileUrl || resolved.finalUrl || record.link,
+        postUrl: record.type === "post" ? resolved.postUrl || resolved.finalUrl || record.postUrl || record.link : record.postUrl,
+        handle: record.handle || resolved.handle || "",
+        name: record.name || resolved.name || "",
+        followers: record.followers || resolved.followers || "",
+        engagement: record.engagement || resolved.engagement || "",
+        bio: record.bio || resolved.description || "",
+        postTitle: record.postTitle || resolved.postTitle || "",
+        postPublishedAt: record.postPublishedAt || resolved.publishedAt || "",
+        postDateText: record.postDateText || formatChineseDate(resolved.publishedAt) || "",
+        resolveStatus: "已自动识别",
+        resolveMessage: "已打开链接并自动识别信息，请确认后保存"
+      };
+      return merged;
+    }
+
+    async function resolveProfileUrl(link) {
+      try {
+        const endpoint = apiEndpoint("/api/resolve-profile");
+        endpoint.searchParams.set("url", link);
+        const response = await fetch(endpoint, { headers: { "Accept": "application/json" } });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const data = await response.json();
+        if (!data.ok) return data;
+        return data;
+      } catch (error) {
+        return {
+          ok: false,
+          message: "链接已收到，但本机解析服务没有连上。请确认 http://127.0.0.1:8787/ 正在打开。"
+        };
+      }
+    }
+
+    function apiEndpoint(path) {
+      return location.protocol.startsWith("http")
+        ? new URL(path.replace(/^\//, ""), location.href)
+        : new URL(`http://127.0.0.1:8787${path}`);
+    }
+
+    async function hydrateServerRecords() {
+      try {
+        const response = await fetch(apiEndpoint("/api/records"), { headers: { "Accept": "application/json" } });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const data = await response.json();
+        if (!Array.isArray(data.records) || !data.records.length) {
+          if (state.records.length) {
+            await saveRecords();
+            statusLine.textContent = "已把本机记录同步到后台";
+          }
+          return;
+        }
+        state.records = data.records;
+        localStorage.setItem(KEY, JSON.stringify(state.records));
+        render();
+        statusLine.textContent = "已连接后台记录";
+      } catch {
+        statusLine.textContent = "现在使用本机浏览器记录；如需多人共用，请保持后台服务开启";
+      }
+    }
+
+    async function openReportPng() {
+      await saveRecords();
+      window.open(apiEndpoint("/api/report.png").href, "_blank", "noopener,noreferrer");
+    }
+
+    function parseProfile(text) {
+      const raw = text.trim();
+      const compact = raw.replace(/\s+/g, " ");
+      const link = (raw.match(/https?:\/\/\S+/i) || [""])[0].replace(/[，,。)）]+$/g, "");
+      const lower = raw.toLowerCase();
+      let platform = "";
+      if (/小红书|xiaohongshu|xhs|rednote|xhslink/.test(lower) || /xiaohongshu|xhslink/.test(link)) platform = "小红书";
+      else if (/instagram|instagr\.am|ig\b/.test(lower)) platform = "Instagram";
+      else if (/tiktok|douyin|抖音/.test(lower)) platform = /douyin|抖音/.test(lower) ? "抖音" : "TikTok";
+      else if (/facebook|fb\.com/.test(lower)) platform = "Facebook";
+
+      let handle = "";
+      const atMatch = compact.match(/@([^\s:：,，的]+)/);
+      if (atMatch) handle = "@" + atMatch[1].replace(/[，,。]+$/g, "");
+      if (!handle && link) {
+        const urlMatch = link.match(/(?:instagram\.com|tiktok\.com\/@|facebook\.com)\/@?([^/?#]+)/i);
+        if (urlMatch && !["share", "explore", "reel", "p"].includes(urlMatch[1])) handle = "@" + decodeURIComponent(urlMatch[1]);
+      }
+
+      const followerMatch = raw.match(/(?:粉丝|followers?)\s*[:：]?\s*([\d,.]+)\s*([万kKmM]?)/i);
+      const followers = followerMatch ? normalizeNumber(followerMatch[1], followerMatch[2]) : "";
+      const engagementMatch = raw.match(/(?:获赞与收藏|赞藏|获赞|likes?)\s*[:：]?\s*([\d,.]+)\s*([万kKmM]?)/i);
+      const engagement = engagementMatch ? normalizeNumber(engagementMatch[1], engagementMatch[2]) : "";
+      let name = "";
+      const nameMatch = compact.match(/(?:名字|Name)\s*[:：]\s*([^\s,，]+)/i);
+      if (nameMatch) name = nameMatch[1];
+      if (!name && handle) name = handle.replace(/^@/, "").replace(/的个人主页$/, "");
+      if (!name) {
+        const homeMatch = compact.match(/([^\s,，。]{2,24})的个人主页/);
+        if (homeMatch) name = homeMatch[1].replace(/^@/, "");
+      }
+      const postTitle = state.mode === "post" ? compact.split(/https?:\/\//i)[0].replace(/小红书|Instagram|TikTok|抖音|Facebook/gi, "").trim().slice(0, 60) : "";
+
+      return { platform, link, handle, name, followers, engagement, postTitle, bio: "" };
+    }
+
+    function parseBooking(text) {
+      const raw = text.trim();
+      const date = parseDate(raw);
+      const timeText = parseTime(raw);
+      const paxMatch = raw.match(/(\d+)\s*(?:pax|px|人|位|位客人|个人)/i);
+      const phoneMatch = raw.match(/(?:\+?65[\s-]*)?([689](?:[\s-]?\d){7})\b/);
+      const phone = phoneMatch ? phoneMatch[1].replace(/[^\d]/g, "") : "";
+      return {
+        ...date,
+        timeText,
+        pax: paxMatch ? paxMatch[1] : "",
+        phone
+      };
+    }
+
+    function parseDate(text) {
+      const now = new Date();
+      let year = now.getFullYear();
+      let month = "";
+      let day = "";
+      const ymd = text.match(/(20\d{2})[./-](\d{1,2})[./-](\d{1,2})/);
+      const md = text.match(/(\d{1,2})\s*(?:[./-]|月)\s*(\d{1,2})\s*(?:号|日)?/);
+      if (ymd) {
+        year = Number(ymd[1]);
+        month = Number(ymd[2]);
+        day = Number(ymd[3]);
+      } else if (md) {
+        month = Number(md[1]);
+        day = Number(md[2]);
+      }
+      if (!month || !day) return { dateISO: "", dateText: "", weekday: "" };
+      const d = new Date(year, month - 1, day);
+      if (d.getMonth() !== month - 1 || d.getDate() !== day) return { dateISO: "", dateText: "", weekday: "" };
+      const dateISO = `${year}-${pad(month)}-${pad(day)}`;
+      return {
+        dateISO,
+        dateText: `${day} ${monthName(month)}, ${weekdays[d.getDay()]}`,
+        weekday: weekdays[d.getDay()]
+      };
+    }
+
+    function parseTime(text) {
+      const lower = text.toLowerCase();
+      const half = lower.match(/(\d{1,2})\s*点半/);
+      if (half) return toDisplayTime(Number(half[1]), 30, "");
+      const cn = lower.match(/(\d{1,2})\s*点\s*(\d{1,2})?/);
+      if (cn) return toDisplayTime(Number(cn[1]), Number(cn[2] || 0), "");
+      const ampm = lower.match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)/);
+      if (ampm) return toDisplayTime(Number(ampm[1]), Number(ampm[2] || 0), ampm[3]);
+      const digital = lower.match(/\b([01]?\d|2[0-3]):([0-5]\d)\b/);
+      if (digital) return toDisplayTime(Number(digital[1]), Number(digital[2]), "");
+      return "";
+    }
+
+    function toDisplayTime(hour, minute, suffix) {
+      let h = hour;
+      let period = suffix;
+      if (!period) {
+        period = h >= 12 ? "pm" : "am";
+        if (h === 0) h = 12;
+        if (h > 12) h -= 12;
+      }
+      return `${h}:${pad(minute)} ${period}`;
+    }
+
+    function normalizeNumber(value, unit) {
+      const cleaned = value.replace(/,/g, "");
+      const number = Number(cleaned);
+      if (!Number.isFinite(number)) return value + (unit || "");
+      if (unit === "万") return String(Math.round(number * 10000)).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+      if (/k/i.test(unit)) return String(Math.round(number * 1000)).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+      if (/m/i.test(unit)) return String(Math.round(number * 1000000)).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+      return String(Math.round(number)).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+    }
+
+    function render() {
+      const records = getFilteredRecords();
+      renderSummary();
+      if (!records.length) {
+        recordList.innerHTML = '<div class="empty">还没有预约记录</div>';
+        return;
+      }
+      const grouped = groupByDate(records);
+      recordList.innerHTML = grouped.map(([dateKey, items]) => {
+        const title = items[0].dateText || "未填日期";
+        return `<section class="day">
+          <div class="day-title">${escapeHtml(title)}<span>${items.length} 条</span></div>
+          ${items.map(renderRecord).join("")}
+        </section>`;
+      }).join("");
+      recordList.querySelectorAll("[data-edit]").forEach((btn) => {
+        btn.addEventListener("click", () => startEditRecord(btn.dataset.edit));
+      });
+      recordList.querySelectorAll("[data-cancel]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const record = state.records.find((item) => item.id === btn.dataset.cancel);
+          if (record) {
+            record.status = "取消";
+            record.createdAt = new Date().toISOString();
+            record.highlightUntil = Date.now() + 72 * 60 * 60 * 1000;
+            saveRecords();
+            render();
+          }
+        });
+      });
+      recordList.querySelectorAll("[data-restore]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const record = state.records.find((item) => item.id === btn.dataset.restore);
+          if (record) {
+            record.status = "新增";
+            record.createdAt = new Date().toISOString();
+            record.highlightUntil = Date.now() + 72 * 60 * 60 * 1000;
+            saveRecords();
+            render();
+          }
+        });
+      });
+    }
+
+    function renderSummary() {
+      const all = state.records;
+      const booking = all.filter((item) => normalizeStatus(item.status) === "新增").length;
+      const cancelled = all.filter((item) => normalizeStatus(item.status) === "取消").length;
+      const published = all.filter((item) => normalizeStatus(item.status) === "已发布").length;
+      const updates = all.filter((item) => isHighlighted(item)).length;
+      summary.innerHTML = [
+        ["总记录", all.length],
+        ["新增", booking],
+        ["取消", cancelled],
+        ["已发布", published],
+        ["新更新", updates]
+      ].map(([label, value]) => `<div class="metric"><strong>${value}</strong><span>${label}</span></div>`).join("");
+    }
+
+    function renderRecord(record) {
+      const status = normalizeStatus(record.status);
+      const title = displayCreatorName(record);
+      const handleText = readableHandle(record.handle);
+      const details = [
+        record.platform,
+        handleText && handleText !== title ? handleText : "",
+        record.followers ? `粉丝 ${record.followers}` : "",
+        record.engagement ? `${record.platform === "Instagram" ? "数据" : "赞藏"} ${record.engagement}` : "",
+        record.postDateText ? `发帖 ${record.postDateText}` : "",
+        record.phone ? `电话 ${record.phone}` : "",
+        record.menu,
+        record.remarks
+      ].filter(Boolean).join(" · ");
+      const classes = ["record"];
+      if (isHighlighted(record)) classes.push(status === "已发布" ? "post-update" : "new-update");
+      const linkButtons = renderLinkButtons(record);
+      return `<article class="${classes.join(" ")}">
+        <div>
+          <div class="time">${escapeHtml(record.timeText || "--")}</div>
+          <div class="pax">${escapeHtml(`${record.pax || "?"} pax`)}</div>
+          <span class="chip ${escapeHtml(status)}">${escapeHtml(status)}</span>
+        </div>
+        <div class="creator">
+          <b>${escapeHtml(title)}</b>
+          <div class="meta">${escapeHtml(details || "资料待补")}</div>
+          <div class="meta">${escapeHtml(status === "已发布" ? "探店预约 · 已发帖" : "探店预约")} · 提交人：${escapeHtml(record.submitter || record.owner || "未填写")}</div>
+          ${linkButtons ? `<div class="link-row">${linkButtons}</div>` : ""}
+        </div>
+        <div class="actions">
+          <button type="button" data-edit="${record.id}">编辑</button>
+          ${status === "取消" ? `<button type="button" data-restore="${record.id}">恢复</button>` : status === "已发布" ? "" : `<button type="button" data-cancel="${record.id}">取消</button>`}
+        </div>
+      </article>`;
+    }
+
+    function normalizeStatus(status) {
+      if (status === "已发布") return "已发布";
+      if (status === "取消") return "取消";
+      return "新增";
+    }
+
+    function renderLinkButtons(record) {
+      return [
+        record.link ? renderLinkButton("查看主页", record.link) : "",
+        record.postUrl ? renderLinkButton("查看帖子", record.postUrl) : ""
+      ].filter(Boolean).join("");
+    }
+
+    function renderLinkButton(label, url) {
+      return `<a class="link-pill" href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(label)}</a>`;
+    }
+
+    function getFilteredRecords() {
+      const ownerValue = ownerFilter.value;
+      const statusValue = statusFilter.value;
+      return state.records
+        .filter((item) => ownerValue === "all" || item.owner === ownerValue)
+        .filter((item) => statusValue === "all" || normalizeStatus(item.status) === statusValue)
+        .slice()
+        .sort(sortRecords);
+    }
+
+    function sortRecords(a, b) {
+      const ad = `${a.dateISO || "9999-99-99"} ${pad4(sortMinutes(a.timeText))}`;
+      const bd = `${b.dateISO || "9999-99-99"} ${pad4(sortMinutes(b.timeText))}`;
+      return ad.localeCompare(bd);
+    }
+
+    function sortMinutes(timeText) {
+      const match = String(timeText || "").toLowerCase().match(/(\d{1,2}):(\d{2})\s*(am|pm)?/);
+      if (!match) return 9999;
+      let hour = Number(match[1]);
+      const minute = Number(match[2]);
+      const suffix = match[3];
+      if (suffix === "pm" && hour < 12) hour += 12;
+      if (suffix === "am" && hour === 12) hour = 0;
+      return hour * 60 + minute;
+    }
+
+    function groupByDate(records) {
+      const groups = new Map();
+      records.forEach((record) => {
+        const key = record.dateISO || "undated";
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(record);
+      });
+      return Array.from(groups.entries());
+    }
+
+    function renderReview(record) {
+      reviewPanel.classList.remove("hidden");
+      const facts = record.postUrl ? [
+        ["信息类型", "更新原预约为已发布"],
+        ["识别状态", record.resolveStatus || (record.link ? "分享文字识别" : "未检测到链接")],
+        ["博主名字", record.name || record.handle || "待确认"],
+        ["主页链接", record.link ? renderLinkButton("查看主页", record.link) : "待补", true],
+        ["帖子链接", record.postUrl ? renderLinkButton("查看帖子", record.postUrl) : "待补", true],
+        ["发布时间", record.postDateText || formatChineseDate(record.postPublishedAt) || "待补"],
+        ["粉丝", record.followers || "待补"],
+        [record.platform === "Instagram" ? "帖子 / 关注" : "赞藏 / 总赞", record.engagement || "待补"],
+        ["预约时间", [record.dateText, record.timeText].filter(Boolean).join(" ") || "待补"],
+        ["人数", record.pax ? `${record.pax} pax` : "待补"],
+        ["电话", record.phone || "待补"],
+        ["提交人", record.submitter || record.owner || "未填写"],
+        ["备注", record.remarks || "无"]
+      ] : [
+        ["信息类型", "探店预约"],
+        ["识别状态", record.resolveStatus || (record.link ? "分享文字识别" : "未检测到链接")],
+        ["博主名字", record.name || record.handle || "待确认"],
+        ["主页链接", record.link ? renderLinkButton("查看主页", record.link) : "待补", true],
+        ["粉丝", record.followers || "待补"],
+        [record.platform === "Instagram" ? "帖子 / 关注" : "赞藏 / 总赞", record.engagement || "待补"],
+        ["时间", [record.dateText, record.timeText].filter(Boolean).join(" ") || "待补"],
+        ["人数", record.pax ? `${record.pax} pax` : "待补"],
+        ["电话", record.phone || "待补"],
+        ["提交人", record.submitter || record.owner || "未填写"]
+      ];
+      reviewPanel.innerHTML = `<div class="review-head">
+        <div>
+          <h2>确认信息</h2>
+          <p>保存后会进入后台记录，导出的 Excel 和 PDF 会高亮这次更新。</p>
+        </div>
+        <span class="chip ${escapeHtml(normalizeStatus(record.status))}">${escapeHtml(normalizeStatus(record.status))}</span>
+      </div>
+      <div class="review-grid">
+        ${facts.map(([label, value, isHtml]) => `<div class="fact"><span>${escapeHtml(label)}</span><b>${isHtml ? value : escapeHtml(value)}</b></div>`).join("")}
+      </div>
+      <div class="review-actions">
+        <button class="secondary" type="button" data-review-action="back">返回修改</button>
+        <button class="primary" type="button" data-review-action="save">确定保存</button>
+      </div>`;
+      reviewPanel.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+
+    function renderReport() {
+      const records = getFilteredRecords();
+      reportPanel.classList.remove("hidden");
+      reportPanel.innerHTML = `<div class="report-head">
+        <div>
+          <h2>PangPang 博主探店追踪表</h2>
+          <p>浅蓝为新增预约，浅绿为发帖更新。生成时间：${escapeHtml(new Date().toLocaleString("zh-CN"))}</p>
+        </div>
+        <button class="secondary" type="button" onclick="window.print()">打印 / 存 PDF</button>
+      </div>
+      <table class="report-table">
+        <thead>
+          <tr>
+            <th>更新</th><th>博主</th><th>链接</th><th>粉丝</th><th>数据</th><th>预约时间</th><th>发帖日期</th><th>人数</th><th>电话</th><th>状态</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${records.map((item) => `<tr class="${isHighlighted(item) ? (normalizeStatus(item.status) === "已发布" ? "post-row" : "new-row") : ""}">
+            <td>${escapeHtml(normalizeStatus(item.status) === "已发布" ? "已发帖" : "预约")}</td>
+            <td>${escapeHtml(displayCreatorName(item))}</td>
+            <td>${escapeHtml(linkStatus(item))}</td>
+            <td>${escapeHtml(item.followers || "待补")}</td>
+            <td>${escapeHtml(item.engagement || "待补")}</td>
+            <td>${escapeHtml([item.dateText, item.timeText].filter(Boolean).join(" ") || "待补")}</td>
+            <td>${escapeHtml(item.postDateText || formatChineseDate(item.postPublishedAt) || "")}</td>
+            <td>${escapeHtml(item.pax || "待补")}</td>
+            <td>${escapeHtml(item.phone || "待补")}</td>
+            <td>${escapeHtml(normalizeStatus(item.status))}</td>
+          </tr>`).join("")}
+        </tbody>
+      </table>`;
+    }
+
+    function linkStatus(item) {
+      if (item.postUrl && item.link) return "主页 / 帖子可查看";
+      if (item.postUrl) return "帖子可查看";
+      if (item.link) return "主页可查看";
+      return "待补";
+    }
+
+    function exportCsv() {
+      const header = ["信息类型", "状态", "是否高亮", "日期", "星期", "时间", "发帖日期", "平台", "博主账号", "名字", "粉丝数", "数据/赞藏", "RSVP人数", "电话", "套餐", "备注", "提交人", "主页链接", "帖子链接", "更新时间"];
+      const rows = state.records.slice().sort(sortRecords).map((item) => [
+        item.type === "post" ? "发帖追踪" : "探店预约", normalizeStatus(item.status), isHighlighted(item) ? "是" : "", item.dateISO, item.weekday, item.timeText, item.postDateText || formatChineseDate(item.postPublishedAt), item.platform, item.handle, item.name, item.followers, item.engagement,
+        item.pax, item.phone, item.menu, item.remarks, item.submitter || item.owner, item.link, item.postUrl, item.createdAt
+      ]);
+      const csv = [header, ...rows].map((row) => row.map(csvCell).join(",")).join("\n");
+      const blob = new Blob(["\ufeff" + csv], { type: "text/csv;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `PangPang_博主探店预约_${new Date().toISOString().slice(0, 10)}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+      showToast("已导出 CSV");
+    }
+
+    function hydrateFromShareParams() {
+      const params = new URLSearchParams(window.location.search);
+      const shared = [params.get("title"), params.get("text"), params.get("url")].filter(Boolean).join("\n");
+      if (!shared) return;
+      profileText.value = shared;
+      const likelyPost = /\/explore\/|\/discovery\/item|note|帖子|发布|post/i.test(shared);
+      if (likelyPost) {
+        setMode("post");
+      }
+      statusLine.textContent = "已接收分享内容，请补充时间、人数、电话后确认";
+    }
+
+    function hydrateDemoRecords() {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get("demo") !== "1") return false;
+      const now = Date.now();
+      state.records = [
+        demoRecord("booking", "新增", "2026-07-12", "11:30 am", "2", "87991234", "鲫鱼", "LoveKarma0908", "10+", "1千+", "中文板块营销专员", "午餐推广菜单", "靠窗，少辣", true),
+        demoRecord("booking", "新增", "2026-07-12", "1:00 pm", "3", "91234567", "Mia Eats", "mia_sgfood", "8,420", "26,300", "英文板块营销专员", "午餐推广菜单", "等博主回电话", false),
+        demoRecord("booking", "新增", "2026-07-12", "6:00 pm", "4", "97996245", "Yuki", "yuki.nom", "12,800", "88,000", "中文板块营销专员", "晚餐推广菜单", "已确认不吃牛", true),
+        demoRecord("booking", "新增", "2026-07-12", "7:30 pm", "2", "81239876", "小陈爱吃", "chen_foodie", "3,600", "14,200", "中文板块营销专员", "晚餐推广菜单", "从 7pm 改 7:30pm", true),
+        demoRecord("booking", "已发布", "2026-07-12", "8:45 pm", "2", "87654321", "Kimiii", "kimiii.red", "2,036", "11,000", "英文板块营销专员", "晚餐推广菜单", "已发帖，需老板看曝光", true),
+        demoRecord("booking", "新增", "2026-07-13", "12:00 pm", "2", "92345678", "Taro", "taro.bites", "5,900", "19,500", "英文板块营销专员", "午餐推广菜单", "生日探店", true),
+        demoRecord("booking", "新增", "2026-07-13", "2:15 pm", "1", "83456789", "Nana", "nana_lifestyle", "18,000", "102,000", "中文板块营销专员", "午餐推广菜单", "只喝饮料", false),
+        demoRecord("booking", "新增", "2026-07-13", "5:45 pm", "2", "94567890", "Alicia", "alicia.sg", "7,200", "35,400", "英文板块营销专员", "晚餐推广菜单", "要拍厨房出餐", true),
+        demoRecord("booking", "新增", "2026-07-13", "6:30 pm", "4", "85678901", "饭团日记", "riceball_diary", "4,400", "22,800", "中文板块营销专员", "晚餐推广菜单", "临时改期，待编辑", false),
+        demoRecord("booking", "已发布", "2026-07-13", "9:10 pm", "2", "81234509", "Sophie Finds", "sophiefinds", "21,000", "160,000", "英文板块营销专员", "晚餐推广菜单", "短视频已发", true),
+        demoRecord("booking", "新增", "2026-07-14", "10:45 am", "2", "96789012", "坡岛胃口", "sg_appetite", "9,800", "50,100", "中文板块营销专员", "午餐推广菜单", "需要儿童椅", true),
+        demoRecord("booking", "新增", "2026-07-14", "12:30 pm", "2", "97890123", "Jas Food Map", "jasfoodmap", "31,000", "220,000", "英文板块营销专员", "午餐推广菜单", "午餐合作", false),
+        demoRecord("booking", "新增", "2026-07-14", "6:15 pm", "5", "98901234", "Lemon", "lemonbites", "6,100", "18,700", "中文板块营销专员", "晚餐推广菜单", "2A + 3C", true),
+        demoRecord("booking", "新增", "2026-07-14", "7:00 pm", "2", "89012345", "Foodie Ray", "foodieray", "14,000", "74,000", "英文板块营销专员", "晚餐推广菜单", "等确认菜单", false),
+        demoRecord("booking", "已发布", "2026-07-14", "10:00 pm", "3", "82345098", "小红薯探店", "redfood_sg", "11,500", "90,000", "中文板块营销专员", "晚餐推广菜单", "图文已发", true),
+        demoRecord("booking", "新增", "2026-07-15", "11:00 am", "2", "90123456", "Eva", "eva.eats", "4,900", "16,300", "英文板块营销专员", "午餐推广菜单", "第一次合作", true),
+        demoRecord("booking", "新增", "2026-07-15", "6:00 pm", "3", "81234567", "吃货阿森", "asen_eats", "15,600", "120,000", "中文板块营销专员", "晚餐推广菜单", "要无辣", true),
+        demoRecord("booking", "新增", "2026-07-15", "8:30 pm", "2", "82345678", "Jessie", "jessie.sg", "2,800", "9,400", "英文板块营销专员", "晚餐推广菜单", "等电话", false)
+      ];
+      saveRecords();
+      statusLine.textContent = "已加载 18 条演示记录，列表已按预约时间排序";
+
+      function demoRecord(type, status, dateISO, timeText, pax, phone, name, handle, followers, engagement, submitter, menuValue, note, highlighted) {
+        const d = new Date(`${dateISO}T12:00:00`);
+        return {
+          id: `demo-${dateISO}-${timeText}-${name}`.replace(/\s+/g, "-"),
+          createdAt: new Date(now - Math.floor(Math.random() * 86400000)).toISOString(),
+          highlightUntil: highlighted ? now + 72 * 60 * 60 * 1000 : now - 1000,
+          type,
+          status,
+          owner: submitter,
+          submitter,
+          reportLang: submitter.includes("英文") ? "英文" : "中文",
+          platform: "小红书",
+          link: `https://www.xiaohongshu.com/user/profile/demo-${encodeURIComponent(handle)}`,
+          postUrl: status === "已发布" ? `https://www.xiaohongshu.com/explore/demo-${encodeURIComponent(handle)}` : "",
+          postTitle: status === "已发布" ? `${name} 探店发布` : "",
+          postPublishedAt: status === "已发布" ? `${dateISO}T12:00:00+08:00` : "",
+          postDateText: status === "已发布" ? formatChineseDate(`${dateISO}T12:00:00+08:00`) : "",
+          handle: `@${handle}`,
+          name,
+          followers,
+          engagement,
+          dateISO,
+          dateText: `${Number(dateISO.slice(8, 10))} ${monthName(Number(dateISO.slice(5, 7)))}, ${weekdays[d.getDay()]}`,
+          weekday: weekdays[d.getDay()],
+          timeText,
+          pax,
+          phone,
+          menu: menuValue,
+          remarks: note,
+          resolveStatus: "演示数据"
+        };
+      }
+      return true;
+    }
+
+    function isHighlighted(item) {
+      if (!item.highlightUntil) return false;
+      return Number(item.highlightUntil) > Date.now();
+    }
+
+    function csvCell(value) {
+      const text = String(value || "");
+      return `"${text.replace(/"/g, '""')}"`;
+    }
+
+    function loadRecords() {
+      try {
+        return JSON.parse(localStorage.getItem(KEY) || "[]");
+      } catch {
+        return [];
+      }
+    }
+
+    async function saveRecords() {
+      localStorage.setItem(KEY, JSON.stringify(state.records));
+      if (new URLSearchParams(window.location.search).get("demo") === "1") return;
+      try {
+        await fetch(apiEndpoint("/api/records"), {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Accept": "application/json" },
+          body: JSON.stringify({ records: state.records })
+        });
+      } catch {
+        // Local storage remains the fallback when the backend is offline.
+      }
+    }
+
+    function showToast(message) {
+      const toast = $("toast");
+      toast.textContent = message;
+      toast.classList.add("show");
+      clearTimeout(showToast.timer);
+      showToast.timer = setTimeout(() => toast.classList.remove("show"), 1800);
+    }
+
+    function pad(value) {
+      return String(value).padStart(2, "0");
+    }
+
+    function pad4(value) {
+      return String(value).padStart(4, "0");
+    }
+
+    function monthName(month) {
+      return ["Jan", "Feb", "Mar", "Apr", "May", "June", "July", "Aug", "Sept", "Oct", "Nov", "Dec"][month - 1];
+    }
+
+    function escapeHtml(value) {
+      return String(value || "").replace(/[&<>"']/g, (char) => ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#39;"
+      }[char]));
+    }
+  </script>
+</body>
+</html>

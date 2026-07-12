@@ -1,0 +1,29 @@
+services:
+  - type: web
+    name: pangpang-creator-rsvp
+    env: docker
+    plan: starter
+    autoDeploy: true
+    disk:
+      name: pangpang-creator-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATA_DIR
+        value: /var/data
+      - key: OUTPUT_DIR
+        value: /tmp/pangpang-output
+      - key: PYTHON_BIN
+        value: python3
+      - key: SEND_EMAILS
+        value: "0"
+      - key: PUBLIC_URL
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false
+      - key: NOTIFY_FROM
+        sync: false
+      - key: NOTIFY_TO
+        sync: false
