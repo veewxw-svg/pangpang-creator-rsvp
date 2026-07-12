@@ -14,6 +14,8 @@ const recordsPath = join(dataDir, "records.json");
 const outputDir = process.env.OUTPUT_DIR || join(root, "output");
 const reportPath = join(outputDir, "pangpang_creator_report.png");
 const reportScript = join(root, "generate_live_report_png.py");
+const reportPdfPath = join(outputDir, "pangpang_creator_report.pdf");
+const reportPdfScript = join(root, "generate_live_report_pdf.py");
 const bundledPython = "/Users/Vee/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3";
 const pythonBin = process.env.PYTHON_BIN || (existsSync(bundledPython) ? bundledPython : "python3");
 
@@ -22,7 +24,8 @@ const mime = {
   ".js": "text/javascript; charset=utf-8",
   ".webmanifest": "application/manifest+json; charset=utf-8",
   ".json": "application/json; charset=utf-8",
-  ".png": "image/png"
+  ".png": "image/png",
+  ".pdf": "application/pdf"
 };
 
 createServer(async (req, res) => {
@@ -63,6 +66,19 @@ createServer(async (req, res) => {
       writeCors(res, 200, {
         "Content-Type": "image/png",
         "Cache-Control": "no-store"
+      });
+      res.end(body);
+      return;
+    }
+
+    if (url.pathname === "/api/report.pdf") {
+      const records = await readRecords();
+      await generateReportPdf(records);
+      const body = await readFile(reportPdfPath);
+      writeCors(res, 200, {
+        "Content-Type": "application/pdf",
+        "Cache-Control": "no-store",
+        "Content-Disposition": "inline; filename=\"PangPang_creator_report.pdf\""
       });
       res.end(body);
       return;
@@ -112,6 +128,20 @@ async function generateReportPng(records, highlightIds = []) {
   });
 }
 
+async function generateReportPdf(records, highlightIds = []) {
+  await mkdir(outputDir, { recursive: true });
+  await writeRecords(records);
+  await runFile(pythonBin, [reportPdfScript], {
+    env: {
+      ...process.env,
+      PANGPANG_RECORDS_JSON: recordsPath,
+      PANGPANG_REPORT_PDF_OUT: reportPdfPath,
+      PANGPANG_HIGHLIGHT_IDS: highlightIds.join(",")
+    },
+    maxBuffer: 1024 * 1024
+  });
+}
+
 async function maybeSendNotification(records, highlightIds = []) {
   if (process.env.SEND_EMAILS !== "1") {
     return { sent: false, reason: "email disabled" };
@@ -120,10 +150,9 @@ async function maybeSendNotification(records, highlightIds = []) {
     return { sent: false, reason: "missing email env" };
   }
 
-  await generateReportPng(records, highlightIds);
-  const image = await readFile(reportPath);
+  await generateReportPdf(records, highlightIds);
+  const pdf = await readFile(reportPdfPath);
   const subject = process.env.NOTIFY_SUBJECT || "PangPang 博主探店预约更新";
-  const siteUrl = process.env.PUBLIC_URL || "";
   const to = process.env.NOTIFY_TO.split(",").map((item) => item.trim()).filter(Boolean);
   const payload = {
     from: process.env.NOTIFY_FROM,
@@ -132,15 +161,14 @@ async function maybeSendNotification(records, highlightIds = []) {
     html: [
       "<div style=\"font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#1d1d1f\">",
       "<h2>PangPang 博主探店预约更新</h2>",
-      "<p>最新全局表已附在邮件里。浅蓝=新增预约，浅绿=发帖更新，浅红=取消。</p>",
-      siteUrl ? `<p><a href="${escapeAttribute(siteUrl)}">打开预约系统</a></p>` : "",
-      notificationLinksHtml(records),
+      "<p>最新全局表 PDF 已附在邮件里。浅蓝=本次新增预约，浅绿=本次发帖更新，浅红=取消。</p>",
+      "<p>主页和帖子按钮放在 PDF 里，可直接点击打开。</p>",
       "</div>"
     ].join(""),
     attachments: [
       {
-        filename: "PangPang_博主探店预约全局表.png",
-        content: image.toString("base64")
+        filename: "PangPang_博主探店预约全局表.pdf",
+        content: pdf.toString("base64")
       }
     ]
   };
@@ -156,51 +184,6 @@ async function maybeSendNotification(records, highlightIds = []) {
   const result = await response.json().catch(() => ({}));
   if (!response.ok) return { sent: false, status: response.status, result };
   return { sent: true, result };
-}
-
-function notificationLinksHtml(records) {
-  const rows = records
-    .filter((record) => record.link || record.postUrl)
-    .slice(0, 30)
-    .map((record) => {
-      const name = escapeHtml(record.name || record.handle || "未识别账号");
-      const date = escapeHtml([record.dateText, record.timeText].filter(Boolean).join(" ") || "未填日期");
-      const home = record.link ? `<a href="${escapeAttribute(record.link)}" style="color:#0071e3;font-weight:700;text-decoration:none">查看主页</a>` : "";
-      const post = record.postUrl ? `<a href="${escapeAttribute(record.postUrl)}" style="color:#0071e3;font-weight:700;text-decoration:none">查看帖子</a>` : "";
-      return [
-        "<tr>",
-        `<td style="padding:10px 12px;border-top:1px solid #e5e5ea;font-weight:700">${name}</td>`,
-        `<td style="padding:10px 12px;border-top:1px solid #e5e5ea;color:#6e6e73">${date}</td>`,
-        `<td style="padding:10px 12px;border-top:1px solid #e5e5ea">${[home, post].filter(Boolean).join(" &nbsp; ")}</td>`,
-        "</tr>"
-      ].join("");
-    }).join("");
-  if (!rows) return "";
-  return [
-    "<h3 style=\"margin-top:24px;margin-bottom:8px\">可点击链接</h3>",
-    "<table style=\"border-collapse:collapse;width:100%;max-width:880px;background:#f5f5f7;border-radius:12px;overflow:hidden\">",
-    "<thead><tr>",
-    "<th style=\"text-align:left;padding:10px 12px;color:#6e6e73\">博主</th>",
-    "<th style=\"text-align:left;padding:10px 12px;color:#6e6e73\">预约时间</th>",
-    "<th style=\"text-align:left;padding:10px 12px;color:#6e6e73\">链接</th>",
-    "</tr></thead>",
-    `<tbody>${rows}</tbody>`,
-    "</table>"
-  ].join("");
-}
-
-function escapeAttribute(value) {
-  return String(value || "").replace(/[&<>"']/g, (char) => ({
-    "&": "&amp;",
-    "<": "&lt;",
-    ">": "&gt;",
-    '"': "&quot;",
-    "'": "&#39;"
-  }[char]));
-}
-
-function escapeHtml(value) {
-  return escapeAttribute(value);
 }
 
 async function readJsonBody(req) {
