@@ -1,13 +1,12 @@
 import json
 import os
+import tempfile
 from pathlib import Path
 from urllib.parse import urlparse
 
-from reportlab.lib import colors
-from reportlab.lib.pagesizes import A3, landscape
-from reportlab.pdfbase.cidfonts import UnicodeCIDFont
-from reportlab.pdfbase import pdfmetrics
-from reportlab.pdfbase.ttfonts import TTFont
+from PIL import Image, ImageDraw, ImageFont
+from reportlab.lib.pagesizes import A4, landscape
+from reportlab.lib.utils import ImageReader
 from reportlab.pdfgen import canvas
 
 
@@ -20,33 +19,22 @@ FONT_REG_CANDIDATES = [
     "/System/Library/Fonts/STHeiti Light.ttc",
     "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
     "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
 ]
 FONT_BOLD_CANDIDATES = [
     os.environ.get("PANGPANG_FONT_BOLD", ""),
     "/System/Library/Fonts/STHeiti Medium.ttc",
     "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc",
     "/usr/share/fonts/truetype/noto/NotoSansCJK-Bold.ttc",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
 ]
 
 
-def register_font(name, candidates):
-    for path in candidates:
+def font(size, bold=False):
+    for path in (FONT_BOLD_CANDIDATES if bold else FONT_REG_CANDIDATES):
         if path and Path(path).exists():
-            try:
-                pdfmetrics.registerFont(TTFont(name, path))
-                return name
-            except Exception:
-                continue
-    fallback = "STSong-Light"
-    try:
-        pdfmetrics.registerFont(UnicodeCIDFont(fallback))
-        return fallback
-    except Exception:
-        return "Helvetica"
-
-
-FONT = register_font("PangPangCJK", FONT_REG_CANDIDATES)
-FONT_BOLD = register_font("PangPangCJKBold", FONT_BOLD_CANDIDATES)
+            return ImageFont.truetype(path, size)
+    return ImageFont.load_default()
 
 
 def normalize_status(value):
@@ -65,13 +53,12 @@ def normalize_profile_url(value):
     raw = str(value or "").strip()
     if not raw:
         return ""
-    try:
-        parsed = urlparse(raw)
+    parsed = urlparse(raw)
+    if parsed.netloc or parsed.path:
         host = parsed.netloc.lower().removeprefix("www.")
         path = parsed.path.rstrip("/").lower()
         return f"{host}{path}" if host or path else ""
-    except Exception:
-        return normalize_loose(raw.split("?")[0].split("#")[0])
+    return normalize_loose(raw.split("?")[0].split("#")[0])
 
 
 def duplicate_key(record):
@@ -154,11 +141,7 @@ def date_title(record):
     return record.get("dateText") or record.get("dateISO") or "未填日期"
 
 
-def text_width(text, font_name, size):
-    return pdfmetrics.stringWidth(str(text or ""), font_name, size)
-
-
-def wrap_text(text, font_name, size, max_width, max_lines=2):
+def wrap_text(draw, text, font_obj, max_width, max_lines=2):
     raw = str(text or "")
     if not raw:
         return [""]
@@ -168,7 +151,7 @@ def wrap_text(text, font_name, size, max_width, max_lines=2):
     current = ""
     for token in tokens:
         test = f"{current}{sep}{token}".strip() if sep else current + token
-        if text_width(test, font_name, size) <= max_width or not current:
+        if draw.textlength(test, font=font_obj) <= max_width or not current:
             current = test
         else:
             lines.append(current)
@@ -176,187 +159,222 @@ def wrap_text(text, font_name, size, max_width, max_lines=2):
             if len(lines) >= max_lines - 1:
                 break
     if current:
-        while text_width(current, font_name, size) > max_width and len(current) > 1:
+        while draw.textlength(current, font=font_obj) > max_width and len(current) > 1:
             current = current[:-1]
         lines.append(current)
     return lines[:max_lines]
 
 
-def draw_text(c, x, y, text, font_name=FONT, size=9, fill=colors.HexColor("#1d1d1f"), max_width=None, max_lines=2):
-    c.setFillColor(fill)
-    c.setFont(font_name, size)
-    lines = wrap_text(text, font_name, size, max_width, max_lines) if max_width else [str(text or "")]
-    for i, line in enumerate(lines):
-        c.drawString(x, y - i * (size + 3), line)
+def draw_wrapped(draw, xy, text, font_obj, fill, max_width, max_lines=2, line_gap=8):
+    x, y = xy
+    for index, line in enumerate(wrap_text(draw, text, font_obj, max_width, max_lines)):
+        draw.text((x, y + index * (font_obj.size + line_gap)), line, fill=fill, font=font_obj)
 
 
-def link_label(record):
-    labels = []
-    if record.get("link"):
-        labels.append(("查看主页", record.get("link")))
-    if record.get("postUrl"):
-        labels.append(("查看帖子", record.get("postUrl")))
-    return labels
+def draw_chip(draw, x, y, text, fill, color, font_obj):
+    pad_x = 14
+    pad_y = 7
+    bbox = draw.textbbox((0, 0), text, font=font_obj)
+    width = bbox[2] - bbox[0] + pad_x * 2
+    height = bbox[3] - bbox[1] + pad_y * 2
+    draw.rounded_rectangle((x, y, x + width, y + height), radius=height // 2, fill=fill)
+    draw.text((x + pad_x, y + pad_y - 2), text, fill=color, font=font_obj)
+    return width
 
 
-try:
-    records = json.loads(RECORDS.read_text("utf-8"))
-    if not isinstance(records, list):
-        records = []
-except Exception:
-    records = []
+def draw_button(draw, x, y, label):
+    width = 128
+    height = 42
+    draw.rounded_rectangle((x, y, x + width, y + height), radius=21, fill="#ffffff", outline="#d2d2d7", width=2)
+    tw = draw.textlength(label, font=BUTTON_FONT)
+    draw.text((x + (width - tw) / 2, y + 9), label, fill=BLUE, font=BUTTON_FONT)
+    return (x, y, width, height)
 
-records = [record for record in records if not is_invalid_draft(record)]
+
+def safe_records():
+    try:
+        records = json.loads(RECORDS.read_text("utf-8"))
+        if isinstance(records, list):
+            return records
+    except Exception:
+        pass
+    return []
+
+
+records = [record for record in safe_records() if not is_invalid_draft(record)]
 records = sorted(records, key=lambda r: (status_sort_rank(r), r.get("dateISO") or "9999-99-99", sort_minutes(r.get("timeText"))))
-DUPLICATE_IDS = duplicate_ids(records)
+duplicate_set = duplicate_ids(records)
 
-OUT.parent.mkdir(parents=True, exist_ok=True)
-c = canvas.Canvas(str(OUT), pagesize=landscape(A3))
-page_w, page_h = landscape(A3)
+SCALE = 2
+PAGE_W_PT, PAGE_H_PT = landscape(A4)
+PAGE_W = int(PAGE_W_PT * SCALE)
+PAGE_H = int(PAGE_H_PT * SCALE)
+M = 48
+HEADER_H = 252
+DATE_H = 48
+CARD_H = 136
+GAP = 10
 
-margin = 34
-top = page_h - 34
-row_h = 42
-date_h = 24
-header_h = 34
+BLACK = "#1d1d1f"
+MUTED = "#6e6e73"
+SOFT = "#8e8e93"
+BLUE = "#0071e3"
+GREEN = "#248a3d"
+PURPLE = "#5856d6"
+RED = "#d70015"
+YELLOW = "#a86f00"
+PANEL = "#f5f5f7"
+LINE = "#e5e5ea"
+BLUE_ROW = "#eef6ff"
+GREEN_ROW = "#effaf2"
+RED_ROW = "#fff1f1"
+ORANGE_ROW = "#fff8e8"
 
-cols = [
-    ("状态", 42),
-    ("预约时间", 66),
-    ("博主", 142),
-    ("平台", 62),
-    ("粉丝", 52),
-    ("赞/数据", 160),
-    ("帖子数据", 190),
-    ("人数", 36),
-    ("电话", 68),
-    ("博主状态", 76),
-    ("发帖日期", 104),
-    ("链接", 100),
-]
-
-black = colors.HexColor("#1d1d1f")
-muted = colors.HexColor("#6e6e73")
-blue = colors.HexColor("#0071e3")
-purple = colors.HexColor("#5856d6")
-green_text = colors.HexColor("#248a3d")
-header_bg = colors.HexColor("#f5f5f7")
-blue_row = colors.HexColor("#eef6ff")
-green_row = colors.HexColor("#effaf2")
-red_row = colors.HexColor("#fff1f1")
-orange_row = colors.HexColor("#fff8e8")
+TITLE_FONT = font(42, True)
+SUB_FONT = font(18)
+METRIC_FONT = font(28, True)
+METRIC_LABEL_FONT = font(15)
+DATE_FONT = font(25, True)
+NAME_FONT = font(24, True)
+BODY_FONT = font(18)
+SMALL_FONT = font(16)
+CHIP_FONT = font(15, True)
+BUTTON_FONT = font(17, True)
 
 
-def draw_header():
-    c.setFillColor(black)
-    c.setFont(FONT_BOLD, 26)
-    c.drawString(margin, top, "PangPang 博主探店预约全局表")
-    c.setFillColor(muted)
-    c.setFont(FONT, 10)
-    c.drawString(margin, top - 22, "PDF 邮件版｜只高亮本次保存的记录｜主页和帖子按钮可点击")
-    metric_y = top - 66
-    c.setFillColor(header_bg)
-    c.roundRect(margin, metric_y - 26, page_w - margin * 2, 48, 12, fill=1, stroke=0)
+def new_page():
+    image = Image.new("RGB", (PAGE_W, PAGE_H), "#ffffff")
+    draw = ImageDraw.Draw(image)
+    links = []
+    return image, draw, links
+
+
+def draw_header(draw):
+    draw.text((M, 36), "PangPang 博主探店预约全局表", fill=BLACK, font=TITLE_FONT)
+    draw.text((M, 90), "PDF 邮件版｜按预约时间排序｜按钮可点击打开主页或帖子", fill=MUTED, font=SUB_FONT)
+    y = 124
+    draw.rounded_rectangle((M, y, PAGE_W - M, y + 82), radius=22, fill=PANEL)
     metrics = [
         ("总记录", len(records)),
         ("新增", sum(1 for r in records if normalize_status(r.get("status")) == "新增")),
         ("已发布", sum(1 for r in records if normalize_status(r.get("status")) == "已发布")),
         ("取消", sum(1 for r in records if normalize_status(r.get("status")) == "取消")),
-        ("本次高亮", sum(1 for r in records if str(r.get("id") or "") in HIGHLIGHT_IDS)),
+        ("重复", len(duplicate_set)),
     ]
-    x = margin + 20
+    x = M + 34
+    step = (PAGE_W - M * 2 - 68) / 5
     for label, value in metrics:
-        c.setFillColor(black)
-        c.setFont(FONT_BOLD, 18)
-        c.drawString(x, metric_y, str(value))
-        c.setFillColor(muted)
-        c.setFont(FONT, 8)
-        c.drawString(x, metric_y - 14, label)
-        x += 150
+        draw.text((x, y + 14), str(value), fill=BLACK, font=METRIC_FONT)
+        draw.text((x, y + 50), label, fill=SOFT, font=METRIC_LABEL_FONT)
+        x += step
 
 
-def draw_table_header(y):
-    c.setFillColor(header_bg)
-    c.roundRect(margin, y - header_h + 8, page_w - margin * 2, header_h, 8, fill=1, stroke=0)
-    x = margin + 8
-    for label, width in cols:
-        draw_text(c, x, y - 10, label, FONT_BOLD, 9, muted)
-        x += width
-
-
-draw_header()
-y = top - 120
-draw_table_header(y)
-y -= header_h
-last_date = None
-
-for record in records:
-    needed = row_h + (date_h if date_title(record) != last_date else 0)
-    if y - needed < 50:
-        c.showPage()
-        draw_header()
-        y = top - 120
-        draw_table_header(y)
-        y -= header_h
-        last_date = None
-
-    date = date_title(record)
-    if date != last_date:
-        c.setFillColor(black)
-        c.setFont(FONT_BOLD, 13)
-        c.drawString(margin + 4, y - 4, date)
-        y -= date_h
-        last_date = date
-
+def row_fill(record):
     status = normalize_status(record.get("status"))
     highlighted = str(record.get("id") or "") in HIGHLIGHT_IDS
-    fill = colors.white
-    duplicate = str(record.get("id") or "") in DUPLICATE_IDS
+    duplicate = str(record.get("id") or "") in duplicate_set
+    if status == "取消":
+        return RED_ROW
     if status == "已发布" and highlighted:
-        fill = green_row
-    elif status == "取消":
-        fill = red_row
-    elif highlighted:
-        fill = blue_row
-    elif duplicate:
-        fill = orange_row
-    c.setFillColor(fill)
-    c.roundRect(margin, y - row_h + 8, page_w - margin * 2, row_h - 4, 6, fill=1, stroke=0)
+        return GREEN_ROW
+    if highlighted:
+        return BLUE_ROW
+    if duplicate:
+        return ORANGE_ROW
+    return "#ffffff"
 
-    values = [
-        " / ".join([status, "重复"] if duplicate else [status]),
-        record.get("timeText") or "-",
-        display_name(record),
-        record.get("platform") or "待补",
-        record.get("followers") or "待补",
-        record.get("engagement") or "待补",
-        record.get("postMetricsText") or "待补",
-        record.get("pax") or "待补",
-        record.get("phone") or "待补",
-        payment_text(record) or "待补",
-        record.get("postDateText") or "-",
+
+def add_link(links, rect, url):
+    if not url:
+        return
+    x, y, w, h = rect
+    links.append((url, x / SCALE, (PAGE_H - y - h) / SCALE, (x + w) / SCALE, (PAGE_H - y) / SCALE))
+
+
+def draw_record(draw, links, record, y):
+    status = normalize_status(record.get("status"))
+    duplicate = str(record.get("id") or "") in duplicate_set
+    x0 = M
+    x1 = PAGE_W - M
+    draw.rounded_rectangle((x0, y, x1, y + CARD_H), radius=18, fill=row_fill(record), outline=LINE, width=1)
+
+    status_color = PURPLE if status == "已发布" else RED if status == "取消" else GREEN
+    draw.text((x0 + 24, y + 24), record.get("timeText") or "--", fill=BLACK, font=NAME_FONT)
+    draw.text((x0 + 24, y + 58), f"{record.get('pax') or '?'} pax", fill=SOFT, font=BODY_FONT)
+    draw_chip(draw, x0 + 24, y + 86, status, "#e8f3ec" if status == "新增" else "#ececff" if status == "已发布" else "#ffe8ea", status_color, CHIP_FONT)
+    if duplicate:
+        draw_chip(draw, x0 + 94, y + 86, "重复", "#fff0d6", YELLOW, CHIP_FONT)
+
+    main_x = x0 + 178
+    button_x = x1 - 300
+    max_main_width = button_x - main_x - 28
+    draw_wrapped(draw, (main_x, y + 18), display_name(record), NAME_FONT, BLACK, max_main_width, 1)
+    details = [
+        record.get("platform") or "",
+        f"粉丝 {record.get('followers')}" if record.get("followers") else "",
+        f"{'数据' if record.get('platform') == 'Instagram' else '赞藏'} {record.get('engagement')}" if record.get("engagement") else "",
+        f"帖子数据 {record.get('postMetricsText')}" if record.get("postMetricsText") else "",
+        f"发帖 {record.get('postDateText')}" if record.get("postDateText") else "",
+        payment_text(record),
+        f"电话 {record.get('phone')}" if record.get("phone") else "",
     ]
+    if duplicate:
+        details.insert(0, "重复博主")
+    draw_wrapped(draw, (main_x, y + 54), " · ".join([item for item in details if item]) or "资料待补", BODY_FONT, MUTED, max_main_width, 2)
+    remarks = record.get("remarks") or ""
+    if remarks:
+        draw_wrapped(draw, (main_x, y + 106), remarks, SMALL_FONT, SOFT, max_main_width, 1)
 
-    x = margin + 8
-    for idx, (text, (_, width)) in enumerate(zip(values, cols)):
-        color = purple if "已发布" in str(text) else green_text if idx == 8 and text != "待补" else black
-        size = 8 if idx in (5, 6, 10) else 9
-        font_name = FONT_BOLD if idx == 0 else FONT
-        draw_text(c, x, y - 10, text, font_name, size, color, width - 5, 2)
-        x += width
+    button_y = y + 22
+    if record.get("link"):
+        add_link(links, draw_button(draw, button_x, button_y, "查看主页"), record.get("link"))
+        button_y += 52
+    if record.get("postUrl"):
+        add_link(links, draw_button(draw, button_x, button_y, "查看帖子"), record.get("postUrl"))
 
-    link_x = margin + 8 + sum(width for _, width in cols[:-1])
-    link_y = y - 10
-    for label, url in link_label(record):
-        draw_text(c, link_x, link_y, label, FONT_BOLD, 9, blue)
-        tw = text_width(label, FONT_BOLD, 9)
-        c.linkURL(url, (link_x, link_y - 2, link_x + tw, link_y + 10), relative=0)
-        link_y -= 14
 
-    y -= row_h
+OUT.parent.mkdir(parents=True, exist_ok=True)
+pdf = canvas.Canvas(str(OUT), pagesize=landscape(A4))
+page_images = []
 
-c.setFillColor(muted)
-c.setFont(FONT, 8)
-c.drawString(margin, 26, "颜色说明：浅蓝=本次新增预约｜浅绿=本次发帖更新｜浅红=取消但保留记录｜浅橙=重复博主。")
-c.save()
+image, draw, links = new_page()
+draw_header(draw)
+y = HEADER_H
+last_date = None
+
+if not records:
+    draw.text((M, HEADER_H + 80), "暂无记录", fill=MUTED, font=DATE_FONT)
+
+for record in records:
+    needs_date = date_title(record) != last_date
+    needed = CARD_H + GAP + (DATE_H if needs_date else 0)
+    if y + needed > PAGE_H - 54:
+        page_images.append((image, links))
+        image, draw, links = new_page()
+        draw_header(draw)
+        y = HEADER_H
+        last_date = None
+        needs_date = True
+
+    if needs_date:
+        draw.text((M + 8, y + 8), date_title(record), fill=BLACK, font=DATE_FONT)
+        y += DATE_H
+        last_date = date_title(record)
+
+    draw_record(draw, links, record, y)
+    y += CARD_H + GAP
+
+page_images.append((image, links))
+
+with tempfile.TemporaryDirectory() as tmp:
+    for index, (image, links) in enumerate(page_images):
+        path = Path(tmp) / f"page_{index}.png"
+        image.save(path)
+        pdf.drawImage(ImageReader(str(path)), 0, 0, width=PAGE_W_PT, height=PAGE_H_PT)
+        for url, x1, y1, x2, y2 in links:
+            pdf.linkURL(url, (x1, y1, x2, y2), relative=0, thickness=0, color=None)
+        if index < len(page_images) - 1:
+            pdf.showPage()
+
+pdf.save()
 print(OUT)
