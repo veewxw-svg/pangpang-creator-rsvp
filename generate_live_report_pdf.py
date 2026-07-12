@@ -4,6 +4,7 @@ from pathlib import Path
 
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A3, landscape
+from reportlab.pdfbase.cidfonts import UnicodeCIDFont
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfgen import canvas
@@ -30,9 +31,17 @@ FONT_BOLD_CANDIDATES = [
 def register_font(name, candidates):
     for path in candidates:
         if path and Path(path).exists():
-            pdfmetrics.registerFont(TTFont(name, path))
-            return name
-    return "Helvetica"
+            try:
+                pdfmetrics.registerFont(TTFont(name, path))
+                return name
+            except Exception:
+                continue
+    fallback = "STSong-Light"
+    try:
+        pdfmetrics.registerFont(UnicodeCIDFont(fallback))
+        return fallback
+    except Exception:
+        return "Helvetica"
 
 
 FONT = register_font("PangPangCJK", FONT_REG_CANDIDATES)
