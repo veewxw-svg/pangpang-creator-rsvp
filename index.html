@@ -1046,7 +1046,7 @@
         const resolved = await resolveProfileUrl(item.link);
         if (!resolved.ok) continue;
         const candidate = mergeResolvedProfileForMatch(item, resolved);
-        if (sameCreator(candidate, postRecord)) return candidate;
+        if (sameCreator(candidate, postRecord)) return item;
       }
       return null;
     }
@@ -1653,13 +1653,14 @@
     function renderReview(record) {
       reviewPanel.classList.remove("hidden");
       const duplicate = isDuplicateRecord(record, recordsWithCandidate(record));
+      const postMissingText = record.platform === "Instagram" ? "Instagram未公开" : "待补";
       const facts = record.postUrl ? [
         ["博主名字", editableFact("name", record.name || record.handle || ""), true],
         ["主页链接", record.link ? renderLinkButton("查看主页", record.link) : "待补", true],
         ...(duplicate ? [["重复提醒", '<span class="chip 重复">重复博主</span>', true]] : []),
         ["帖子链接", record.postUrl ? renderLinkButton("查看帖子", record.postUrl) : "待补", true],
-        ["发布时间", record.postDateText || formatChineseDate(record.postPublishedAt) || "待补"],
-        ["帖子数据", record.postMetricsText || "待补"],
+        ["发布时间", record.postDateText || formatChineseDate(record.postPublishedAt) || postMissingText],
+        ["帖子数据", record.postMetricsText || postMissingText],
         ["粉丝", editableFact("followers", record.followers || ""), true],
         [record.platform === "Instagram" ? "帖子 / 关注" : "赞藏 / 总赞", editableFact("engagement", record.engagement || ""), true],
         ["预约时间", [record.dateText, record.timeText].filter(Boolean).join(" ") || "待补"],
