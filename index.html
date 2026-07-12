@@ -846,7 +846,15 @@
             postCollects: existing.postCollects || draft.postCollects,
             postComments: existing.postComments || draft.postComments,
             postShares: existing.postShares || draft.postShares,
-            postMetricsText: existing.postMetricsText || draft.postMetricsText
+            postMetricsText: existing.postMetricsText || draft.postMetricsText,
+            dateISO: draft.dateISO || existing.dateISO || "",
+            dateText: draft.dateText || existing.dateText || "",
+            weekday: draft.weekday || existing.weekday || "",
+            timeText: draft.timeText || existing.timeText || "",
+            pax: draft.pax || existing.pax || "",
+            phone: draft.phone || existing.phone || "",
+            visitType: draft.visitType || existing.visitType || "",
+            feeAmount: draft.feeAmount || existing.feeAmount || ""
           }
         : draft;
       const enriched = await enrichRecord(record);
@@ -1036,6 +1044,10 @@
       }
     }
 
+    function isXhsLink(value) {
+      return /xiaohongshu\.com|xhslink\.com/i.test(String(value || ""));
+    }
+
     function formatChineseDate(value) {
       if (!value) return "";
       const date = new Date(value);
@@ -1063,7 +1075,7 @@
         postUrl: postRecord.postUrl || postRecord.link || booking.postUrl,
         postTitle: postRecord.postTitle || booking.postTitle || "",
         postPublishedAt: postRecord.postPublishedAt || booking.postPublishedAt || "",
-        postDateText: formatChineseDate(postRecord.postPublishedAt) || postRecord.postDateText || booking.postDateText || "",
+        postDateText: postRecord.postPublishedAt ? formatChineseDate(postRecord.postPublishedAt) : (isXhsLink(postRecord.postUrl || postRecord.link) ? "" : postRecord.postDateText || booking.postDateText || ""),
         postLikes: postRecord.postLikes || booking.postLikes || "",
         postCollects: postRecord.postCollects || booking.postCollects || "",
         postComments: postRecord.postComments || booking.postComments || "",
@@ -1107,8 +1119,8 @@
         engagement: record.engagement || resolved.engagement || "",
         bio: record.bio || resolved.description || "",
         postTitle: record.postTitle || resolved.postTitle || "",
-        postPublishedAt: resolved.publishedAt || record.postPublishedAt || "",
-        postDateText: formatChineseDate(resolved.publishedAt) || record.postDateText || "",
+        postPublishedAt: resolved.publishedAt || (isXhsLink(record.postUrl || record.link) ? "" : record.postPublishedAt || ""),
+        postDateText: resolved.publishedAt ? formatChineseDate(resolved.publishedAt) : (isXhsLink(record.postUrl || record.link) ? "" : record.postDateText || ""),
         postLikes: resolved.postLikes || record.postLikes || "",
         postCollects: resolved.postCollects || record.postCollects || "",
         postComments: resolved.postComments || record.postComments || "",
@@ -1182,11 +1194,12 @@
           postComments: resolved.postComments || record.postComments || "",
           postShares: resolved.postShares || record.postShares || "",
           postMetricsText: resolved.postMetricsText || record.postMetricsText || "",
-          postPublishedAt: resolved.publishedAt || record.postPublishedAt || "",
-          postDateText: formatChineseDate(resolved.publishedAt) || record.postDateText || ""
+          postPublishedAt: resolved.publishedAt || (isXhsLink(record.postUrl || record.link) ? "" : record.postPublishedAt || ""),
+          postDateText: resolved.publishedAt ? formatChineseDate(resolved.publishedAt) : (isXhsLink(record.postUrl || record.link) ? "" : record.postDateText || "")
         };
         Object.entries(updates).forEach(([key, value]) => {
-          if (value && record[key] !== value) {
+          const canClear = key === "postPublishedAt" || key === "postDateText";
+          if ((value || canClear) && record[key] !== value) {
             record[key] = value;
             changed = true;
           }

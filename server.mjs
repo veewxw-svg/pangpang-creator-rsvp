@@ -525,14 +525,6 @@ function parseXhsPostCounts(html) {
 }
 
 function parseXhsPublishedAt(html, meta = {}) {
-  const direct = [
-    meta.articlePublishedTime,
-    html.match(/<meta[^>]+itemprop=["']datePublished["'][^>]+content=["']([^"']+)["'][^>]*>/i)?.[1],
-    html.match(/"datePublished"\s*:\s*"([^"]+)"/i)?.[1],
-    html.match(/"uploadDate"\s*:\s*"([^"]+)"/i)?.[1]
-  ].filter(Boolean).map(decodeEntities).find(Boolean);
-  if (direct) return direct;
-
   const explicitTextDate = parseXhsExplicitPublishedText(html);
   if (explicitTextDate) return explicitTextDate;
 
