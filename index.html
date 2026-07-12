@@ -825,9 +825,25 @@
       event.preventDefault();
       statusLine.textContent = state.editingId ? "正在更新这条记录..." : "正在打开链接识别博主信息...";
       const existing = state.editingId ? state.records.find((item) => item.id === state.editingId) : null;
+      const draft = buildRecord(false);
       const record = existing
-        ? { ...existing, ...buildRecord(false), id: existing.id, createdAt: existing.createdAt, highlightUntil: existing.highlightUntil }
-        : buildRecord(false);
+        ? {
+            ...existing,
+            ...draft,
+            id: existing.id,
+            createdAt: existing.createdAt,
+            highlightUntil: existing.highlightUntil,
+            postUrl: existing.postUrl || draft.postUrl,
+            postTitle: existing.postTitle || draft.postTitle,
+            postPublishedAt: existing.postPublishedAt || draft.postPublishedAt,
+            postDateText: existing.postDateText || draft.postDateText,
+            postLikes: existing.postLikes || draft.postLikes,
+            postCollects: existing.postCollects || draft.postCollects,
+            postComments: existing.postComments || draft.postComments,
+            postShares: existing.postShares || draft.postShares,
+            postMetricsText: existing.postMetricsText || draft.postMetricsText
+          }
+        : draft;
       const enriched = await enrichRecord(record);
       if (!state.editingId && enriched.type === "post" && enriched.ok !== false) {
         const matched = findMatchingBooking(enriched);
@@ -1469,7 +1485,7 @@
         ["博主名字", editableFact("name", record.name || record.handle || ""), true],
         ["主页链接", record.link ? renderLinkButton("查看主页", record.link) : "待补", true],
         ["帖子链接", record.postUrl ? renderLinkButton("查看帖子", record.postUrl) : "待补", true],
-        ["发布时间", record.postDateText || formatChineseDate(record.postPublishedAt) || "待补"],
+        ["发布时间", editableFact("postDateText", record.postDateText || formatChineseDate(record.postPublishedAt) || ""), true],
         ["帖子数据", record.postMetricsText || "待补"],
         ["粉丝", editableFact("followers", record.followers || ""), true],
         [record.platform === "Instagram" ? "帖子 / 关注" : "赞藏 / 总赞", editableFact("engagement", record.engagement || ""), true],
@@ -1524,6 +1540,9 @@
           state.pendingRecord.followers = value;
         } else if (field === "engagement") {
           state.pendingRecord.engagement = value;
+        } else if (field === "postDateText") {
+          state.pendingRecord.postDateText = value;
+          if (value) state.pendingRecord.postPublishedAt = "";
         }
       });
     }
