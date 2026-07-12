@@ -51,7 +51,8 @@ createServer(async (req, res) => {
 
     if (url.pathname === "/api/records" && req.method === "POST") {
       const body = await readJsonBody(req);
-      const records = Array.isArray(body.records) ? body.records : [];
+      const incomingRecords = Array.isArray(body.records) ? body.records : [];
+      const records = mergeRecords(await readRecords(), incomingRecords);
       await writeRecords(records);
       const highlightIds = Array.isArray(body.highlightIds) ? body.highlightIds.map(String) : [];
       const notification = body.silent ? { skipped: true, reason: "silent update" } : await maybeSendNotification(records, highlightIds);
@@ -112,6 +113,17 @@ async function readRecords() {
 async function writeRecords(records) {
   await mkdir(dataDir, { recursive: true });
   await writeFile(recordsPath, JSON.stringify(records, null, 2), "utf8");
+}
+
+function mergeRecords(existingRecords, incomingRecords) {
+  const byId = new Map();
+  for (const record of Array.isArray(existingRecords) ? existingRecords : []) {
+    if (record && record.id) byId.set(String(record.id), record);
+  }
+  for (const record of Array.isArray(incomingRecords) ? incomingRecords : []) {
+    if (record && record.id) byId.set(String(record.id), record);
+  }
+  return Array.from(byId.values());
 }
 
 async function generateReportPng(records, highlightIds = []) {
