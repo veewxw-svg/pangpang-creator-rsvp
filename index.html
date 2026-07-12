@@ -1499,8 +1499,6 @@
     function renderReview(record) {
       reviewPanel.classList.remove("hidden");
       const facts = record.postUrl ? [
-        ["信息类型", "更新原预约为已发布"],
-        ["识别状态", record.resolveStatus || (record.link ? "分享文字识别" : "未检测到链接")],
         ["博主名字", editableFact("name", record.name || record.handle || ""), true],
         ["主页链接", record.link ? renderLinkButton("查看主页", record.link) : "待补", true],
         ["帖子链接", record.postUrl ? renderLinkButton("查看帖子", record.postUrl) : "待补", true],
@@ -1515,8 +1513,6 @@
         ["提交人", record.submitter || record.owner || "未填写"],
         ["备注", record.remarks || "无"]
       ] : [
-        ["信息类型", "探店预约"],
-        ["识别状态", record.resolveStatus || (record.link ? "分享文字识别" : "未检测到链接")],
         ["博主名字", editableFact("name", record.name || record.handle || ""), true],
         ["主页链接", record.link ? renderLinkButton("查看主页", record.link) : "待补", true],
         ["粉丝", editableFact("followers", record.followers || ""), true],
