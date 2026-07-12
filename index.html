@@ -1161,14 +1161,14 @@
       let month = "";
       let day = "";
       const ymd = text.match(/(20\d{2})[./-](\d{1,2})[./-](\d{1,2})/);
-      const md = text.match(/(\d{1,2})\s*(?:[./-]|月)\s*(\d{1,2})\s*(?:号|日)?/);
+      const md = text.match(/(\d{1,2})\s*(?:[/-]|月)\s*(\d{1,2})\s*(?:号|日)?|(\d{1,2})\s*\.\s*(\d{1,2})\s*(?:号|日)/);
       const months = {
         jan: 1, january: 1, feb: 2, february: 2, mar: 3, march: 3, apr: 4, april: 4,
         may: 5, jun: 6, june: 6, jul: 7, july: 7, aug: 8, august: 8, sep: 9, sept: 9,
         september: 9, oct: 10, october: 10, nov: 11, november: 11, dec: 12, december: 12
       };
-      const dmy = text.match(/\b(\d{1,2})\s*(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t)?(?:ember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\b/i);
-      const mdy = text.match(/\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t)?(?:ember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s*(\d{1,2})\b/i);
+      const dmy = text.match(/\b(\d{1,2})(?:st|nd|rd|th)?\s*(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t)?(?:ember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\b/i);
+      const mdy = text.match(/\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t)?(?:ember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s*(\d{1,2})(?:st|nd|rd|th)?\b/i);
       if (ymd) {
         year = Number(ymd[1]);
         month = Number(ymd[2]);
@@ -1180,8 +1180,8 @@
         month = months[mdy[1].toLowerCase()];
         day = Number(mdy[2]);
       } else if (md) {
-        month = Number(md[1]);
-        day = Number(md[2]);
+        month = Number(md[1] || md[3]);
+        day = Number(md[2] || md[4]);
       }
       if (!month || !day) return { dateISO: "", dateText: "", weekday: "" };
       const d = new Date(year, month - 1, day);
@@ -1200,7 +1200,7 @@
       if (half) return toDisplayTime(Number(half[1]), 30, "");
       const cn = lower.match(/(\d{1,2})\s*点\s*(\d{1,2})?/);
       if (cn) return toDisplayTime(Number(cn[1]), Number(cn[2] || 0), "");
-      const ampm = lower.match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)/);
+      const ampm = lower.match(/\b(1[0-2]|0?[1-9])(?:[:.](\d{2}))?\s*(am|pm)\b/);
       if (ampm) return toDisplayTime(Number(ampm[1]), Number(ampm[2] || 0), ampm[3]);
       const digital = lower.match(/\b([01]?\d|2[0-3]):([0-5]\d)\b/);
       if (digital) return toDisplayTime(Number(digital[1]), Number(digital[2]), "");
