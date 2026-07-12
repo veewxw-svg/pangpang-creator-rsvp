@@ -1,6 +1,7 @@
 import json
 import os
 import tempfile
+import time
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlparse
@@ -136,6 +137,16 @@ def payment_text(record):
         return visit_type
     amount = record.get("feeAmount") or ""
     return f"付费探店：{amount}" if amount else "付费探店"
+
+
+def is_highlighted(record):
+    record_id = str(record.get("id") or "")
+    if record_id in HIGHLIGHT_IDS:
+        return True
+    try:
+        return float(record.get("highlightUntil") or 0) > time.time() * 1000
+    except (TypeError, ValueError):
+        return False
 
 
 def date_title(record):
@@ -287,7 +298,7 @@ def draw_header(draw):
 
 def row_fill(record):
     status = normalize_status(record.get("status"))
-    highlighted = str(record.get("id") or "") in HIGHLIGHT_IDS
+    highlighted = is_highlighted(record)
     duplicate = str(record.get("id") or "") in duplicate_set
     if status == "取消":
         return RED_ROW

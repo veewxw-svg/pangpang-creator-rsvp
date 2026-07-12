@@ -1,5 +1,6 @@
 import json
 import os
+import time
 from pathlib import Path
 from urllib.parse import urlparse
 from PIL import Image, ImageDraw, ImageFont
@@ -141,6 +142,16 @@ def payment_text(record):
     return f"付费探店：{amount}" if amount else "付费探店"
 
 
+def is_highlighted(record):
+    record_id = str(record.get("id") or "")
+    if record_id in HIGHLIGHT_IDS:
+        return True
+    try:
+        return float(record.get("highlightUntil") or 0) > time.time() * 1000
+    except (TypeError, ValueError):
+        return False
+
+
 def short_text(value, max_chars):
     text = str(value or "")
     if len(text) <= max_chars:
@@ -260,7 +271,7 @@ metrics = [
     ("新增", str(sum(1 for r in records if normalize_status(r.get("status")) == "新增"))),
     ("已发布", str(sum(1 for r in records if normalize_status(r.get("status")) == "已发布"))),
     ("取消", str(sum(1 for r in records if normalize_status(r.get("status")) == "取消"))),
-    ("本次高亮", str(sum(1 for r in records if str(r.get("id") or "") in HIGHLIGHT_IDS))),
+    ("本次高亮", str(sum(1 for r in records if is_highlighted(r)))),
 ]
 mx = 110
 for label, value in metrics:
@@ -302,7 +313,7 @@ for record in records:
         last_date = date
 
     status = normalize_status(record.get("status"))
-    highlighted = str(record.get("id") or "") in HIGHLIGHT_IDS
+    highlighted = is_highlighted(record)
     duplicate = str(record.get("id") or "") in DUPLICATE_IDS
     if status == "已发布" and highlighted:
         fill = green_row
