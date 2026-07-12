@@ -58,6 +58,17 @@ def status_sort_rank(record):
     return 1 if normalize_status(record.get("status")) == "已发布" else 0
 
 
+def is_invalid_draft(record):
+    return (
+        not record.get("dateISO")
+        and not record.get("timeText")
+        and not record.get("phone")
+        and (not record.get("name") or record.get("name") == "待补")
+        and not record.get("followers")
+        and not record.get("engagement")
+    )
+
+
 def display_name(record):
     name = record.get("name") or ""
     handle = str(record.get("handle") or "").lstrip("@")
@@ -95,6 +106,57 @@ def short_text(value, max_chars):
     return text[: max(1, max_chars - 1)] + "…"
 
 
+def wrap_text(draw, text, font_obj, max_width, max_lines=2):
+    raw = str(text or "")
+    if not raw:
+        return [""]
+    if " " in raw:
+        lines = []
+        current = ""
+        for word in raw.split(" "):
+            test = f"{current} {word}".strip()
+            if draw.textlength(test, font=font_obj) <= max_width or not current:
+                current = test
+            else:
+                lines.append(current)
+                current = word
+                if len(lines) >= max_lines - 1:
+                    break
+        if len(lines) >= max_lines - 1:
+            remaining = " ".join(raw.split(" ")[sum(len(line.split(" ")) for line in lines):])
+            current = remaining or current
+            while current and draw.textlength(current, font=font_obj) > max_width:
+                current = " ".join(current.split(" ")[:-1]) or current[:-1]
+        if current:
+            lines.append(current)
+        return lines[:max_lines]
+    lines = []
+    current = ""
+    for char in raw:
+        test = current + char
+        if draw.textlength(test, font=font_obj) <= max_width or not current:
+            current = test
+        else:
+            lines.append(current)
+            current = char
+            if len(lines) >= max_lines - 1:
+                break
+    if len(lines) >= max_lines - 1:
+        remaining = raw[sum(len(line) for line in lines):]
+        current = remaining
+        while current and draw.textlength(current, font=font_obj) > max_width:
+            current = current[:-1]
+    if current:
+        lines.append(current)
+    return lines[:max_lines]
+
+
+def draw_cell(draw, x, y, width, text, fill, font, max_lines=2):
+    lines = wrap_text(draw, text, font, width, max_lines)
+    for line_index, line in enumerate(lines):
+        draw.text((x, y + line_index * 30), line, fill=fill, font=font)
+
+
 def date_title(record):
     return record.get("dateText") or record.get("dateISO") or "未填日期"
 
@@ -106,11 +168,12 @@ try:
 except Exception:
     records = []
 
+records = [record for record in records if not is_invalid_draft(record)]
 records = sorted(records, key=lambda r: (status_sort_rank(r), r.get("dateISO") or "9999-99-99", sort_minutes(r.get("timeText"))))
 
 W = 2480
-row_h = 86
-date_h = 62
+row_h = 108
+date_h = 58
 header_h = 440
 footer_h = 180
 days = []
@@ -162,19 +225,19 @@ for label, value in metrics:
     mx += 445
 
 cols = [
-    ("状态", 110),
-    ("预约时间", 210),
-    ("博主", 320),
-    ("平台", 140),
-    ("粉丝", 130),
-    ("赞/数据", 140),
-    ("帖子数据", 230),
-    ("人数", 78),
-    ("电话", 145),
-    ("博主状态", 180),
-    ("发帖日期", 250),
-    ("链接", 200),
-    ("备注", 130),
+    ("状态", 90),
+    ("预约时间", 170),
+    ("博主", 285),
+    ("平台", 120),
+    ("粉丝", 105),
+    ("赞/数据", 285),
+    ("帖子数据", 300),
+    ("人数", 60),
+    ("电话", 135),
+    ("博主状态", 140),
+    ("发帖日期", 205),
+    ("链接", 170),
+    ("备注", 65),
 ]
 
 x0, y = 70, 350
@@ -237,13 +300,12 @@ for record in records:
             color = green
 
         f = body_f
-        if idx in (3, 8, 9, 10):
+        if idx in (3, 5, 6, 8, 9, 10):
             f = small_f
         if idx == 0:
             f = font(22, True)
 
-        max_chars = max(3, int(width / 12.5))
-        d.text((x, y + 28), short_text(value, max_chars), fill=color, font=f)
+        draw_cell(d, x, y + 22, width - 8, str(value), fill=color, font=f, max_lines=2)
         x += width
 
     y += row_h
