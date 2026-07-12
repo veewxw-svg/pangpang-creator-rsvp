@@ -508,24 +508,68 @@ function parseXhsPublishedAt(html, meta = {}) {
   ].filter(Boolean).map(decodeEntities).find(Boolean);
   if (direct) return direct;
 
+  const explicitTextDate = parseXhsExplicitPublishedText(html);
+  if (explicitTextDate) return explicitTextDate;
+
   const keys = [
-    "publishTime",
-    "publish_time",
-    "publishDate",
-    "publishDateTime",
-    "firstPublishTime",
-    "notePublishTime",
     "noteCreateTime",
     "createTime",
     "create_time",
     "createdTime",
-    "created_at"
+    "created_at",
+    "firstPublishTime",
+    "notePublishTime",
+    "publishDateTime",
+    "publishDate",
+    "publish_time"
   ];
   for (const key of keys) {
-    const match = html.match(new RegExp(`"${key}"\\s*:\\s*"?([0-9]{10,13})"?`, "i"));
-    if (match?.[1]) return timestampToIso(match[1]);
+    const match = findXhsNoteTimestamp(html, key);
+    if (match) return timestampToIso(match);
   }
   return "";
+}
+
+function parseXhsExplicitPublishedText(html) {
+  const source = decodeEntities(stripTags(html)).replace(/\s+/g, " ");
+  const patterns = [
+    /(?:发布于|发表于|发布时间|发布)\s*[:：]?\s*(20\d{2})[年./-]\s*(\d{1,2})[月./-]\s*(\d{1,2})(?:日)?(?:\s+(\d{1,2}):(\d{2}))?/i,
+    /(?:发布于|发表于|发布时间|发布)\s*[:：]?\s*(\d{1,2})[月./-]\s*(\d{1,2})(?:日)?(?:\s+(\d{1,2}):(\d{2}))?/i
+  ];
+  for (const pattern of patterns) {
+    const match = source.match(pattern);
+    if (!match) continue;
+    const hasYear = match[1]?.length === 4;
+    const year = hasYear ? Number(match[1]) : new Date().getFullYear();
+    const month = Number(hasYear ? match[2] : match[1]);
+    const day = Number(hasYear ? match[3] : match[2]);
+    const hour = Number(hasYear ? match[4] || 12 : match[3] || 12);
+    const minute = Number(hasYear ? match[5] || 0 : match[4] || 0);
+    const iso = datePartsToIso(year, month, day, hour, minute);
+    if (iso) return iso;
+  }
+  return "";
+}
+
+function findXhsNoteTimestamp(html, key) {
+  const pattern = new RegExp(`"${key}"\\s*:\\s*"?([0-9]{10,13})"?`, "ig");
+  let match;
+  while ((match = pattern.exec(html))) {
+    const start = Math.max(0, match.index - 900);
+    const end = Math.min(html.length, match.index + 900);
+    const context = html.slice(start, end);
+    if (/lastUpdate|updateTime|updated|editTime|edited|更新时间|编辑于|修改/i.test(context)) continue;
+    if (!/note|笔记|explore|desc|title|interact|liked|collect|comment|share/i.test(context)) continue;
+    return match[1];
+  }
+  return "";
+}
+
+function datePartsToIso(year, month, day, hour = 12, minute = 0) {
+  if (!year || !month || !day) return "";
+  const date = new Date(Date.UTC(year, month - 1, day, hour, minute));
+  if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) return "";
+  return date.toISOString();
 }
 
 function parsePublishedAt(html, meta = {}) {
