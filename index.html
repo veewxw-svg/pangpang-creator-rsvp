@@ -1155,8 +1155,11 @@
           }
           return;
         }
-        state.records = data.records;
+        state.records = data.records.filter((record) => !isInvalidDraftRecord(record));
         localStorage.setItem(KEY, JSON.stringify(state.records));
+        if (state.records.length !== data.records.length) {
+          await saveRecords({ silent: true });
+        }
         render();
         statusLine.textContent = "已连接后台记录";
         refreshPostMetricsOnOpen();
@@ -1707,10 +1710,26 @@
 
     function loadRecords() {
       try {
-        return JSON.parse(localStorage.getItem(KEY) || "[]");
+        const records = JSON.parse(localStorage.getItem(KEY) || "[]");
+        if (!Array.isArray(records)) return [];
+        const cleaned = records.filter((record) => !isInvalidDraftRecord(record));
+        if (cleaned.length !== records.length) {
+          localStorage.setItem(KEY, JSON.stringify(cleaned));
+        }
+        return cleaned;
       } catch {
         return [];
       }
+    }
+
+    function isInvalidDraftRecord(record) {
+      const title = displayCreatorName(record);
+      return !record?.dateISO
+        && !record?.timeText
+        && !record?.phone
+        && (!record?.name || title === "未识别账号")
+        && !record?.followers
+        && !record?.engagement;
     }
 
     async function saveRecords(options = {}) {
