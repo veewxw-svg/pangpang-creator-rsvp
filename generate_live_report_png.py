@@ -74,6 +74,16 @@ def link_status(record):
     return "待补"
 
 
+def payment_text(record):
+    visit_type = record.get("visitType") or ""
+    if not visit_type:
+        return ""
+    if visit_type != "付费探店":
+        return visit_type
+    amount = record.get("feeAmount") or ""
+    return f"付费探店：{amount}" if amount else "付费探店"
+
+
 def short_text(value, max_chars):
     text = str(value or "")
     if len(text) <= max_chars:
@@ -156,9 +166,10 @@ cols = [
     ("赞/数据", 150),
     ("人数", 78),
     ("电话", 145),
+    ("博主状态", 180),
     ("发帖日期", 300),
     ("链接", 230),
-    ("备注", 520),
+    ("备注", 340),
 ]
 
 x0, y = 70, 350
@@ -201,6 +212,7 @@ for record in records:
         record.get("engagement") or "待补",
         record.get("pax") or "待补",
         record.get("phone") or "待补",
+        payment_text(record) or "待补",
         record.get("postDateText") or "-",
         link_status(record),
         record.get("remarks") or "",
