@@ -945,6 +945,7 @@
     function buildRecord(withId = true) {
       const profile = parseProfile(profileText.value);
       const booking = state.mode === "post" ? {} : parseBooking(bookingText.value);
+      const remarkText = mergeBookingRemarks(remarks.value.trim(), booking.partyText);
       return {
         id: withId ? String(Date.now()) : "draft",
         createdAt: new Date().toISOString(),
@@ -973,7 +974,7 @@
         menu: "",
         visitType: state.mode === "post" ? "" : visitType.value,
         feeAmount: state.mode === "post" || visitType.value !== "付费探店" ? "" : feeAmount.value.trim(),
-        remarks: remarks.value.trim()
+        remarks: remarkText
       };
     }
 
@@ -1356,15 +1357,42 @@
       const raw = text.trim();
       const date = parseDate(raw);
       const timeText = parseTime(raw);
-      const paxMatch = raw.match(/(\d+)\s*(?:pax|px|人|位|位客人|个人)/i);
+      const party = parsePartySize(raw);
       const phoneMatch = raw.match(/(?:\+?65[\s-]*)?([689](?:[\s-]?\d){7})\b/);
       const phone = phoneMatch ? phoneMatch[1].replace(/[^\d]/g, "") : "";
       return {
         ...date,
         timeText,
-        pax: paxMatch ? paxMatch[1] : "",
-        phone
+        pax: party.pax,
+        phone,
+        partyText: party.text
       };
+    }
+
+    function parsePartySize(text) {
+      const raw = String(text || "");
+      const combo = raw.match(/\b(\d{1,2})\s*(?:a|adult|adults|大人)\s*(?:\+|,|，|\/|和|\s)+\s*(\d{1,2})\s*(?:c|child|children|kid|kids|小孩|儿童)\b/i)
+        || raw.match(/\b(\d{1,2})\s*(?:c|child|children|kid|kids|小孩|儿童)\s*(?:\+|,|，|\/|和|\s)+\s*(\d{1,2})\s*(?:a|adult|adults|大人)\b/i);
+      if (combo) {
+        const firstIsAdult = /(?:a|adult|adults|大人)/i.test(combo[0].match(/\d{1,2}\s*([a-zA-Z]+|大人|小孩|儿童)/)?.[1] || "");
+        const adults = Number(firstIsAdult ? combo[1] : combo[2]);
+        const children = Number(firstIsAdult ? combo[2] : combo[1]);
+        return {
+          pax: String(adults + children),
+          text: `${adults}A + ${children}C`
+        };
+      }
+      const paxMatch = raw.match(/(\d+)\s*(?:pax|px|人|位|位客人|个人)/i);
+      return {
+        pax: paxMatch ? paxMatch[1] : "",
+        text: ""
+      };
+    }
+
+    function mergeBookingRemarks(current, partyText) {
+      if (!partyText) return current;
+      if (current.toLowerCase().replace(/\s+/g, "").includes(partyText.toLowerCase().replace(/\s+/g, ""))) return current;
+      return [partyText, current].filter(Boolean).join(" / ");
     }
 
     function parseDate(text) {
