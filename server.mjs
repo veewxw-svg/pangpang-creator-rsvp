@@ -195,7 +195,8 @@ async function resolveProfile(target) {
     const xhsPost = parseXhsPost(html, meta, finalUrl);
     const instagram = parseInstagramMeta(meta, html, finalUrl);
     const instagramJson = await fetchInstagramProfileJson(target, finalUrl);
-    const publishedAt = instagram.publishedAt || xhsPost.publishedAt || parsePublishedAt(html, meta);
+    const isXhs = /xiaohongshu\.com|xhslink\.com/i.test(finalUrl);
+    const publishedAt = instagram.publishedAt || xhsPost.publishedAt || (isXhs ? "" : parsePublishedAt(html, meta));
     const combined = [meta.title, meta.description, meta.ogTitle, meta.ogDescription, stripTags(html).slice(0, 3000)].filter(Boolean).join("\n");
     const parsed = parseSharedText(combined, finalUrl);
     const titleName = cleanXhsTitle(meta.title || meta.ogTitle || "");
@@ -451,7 +452,7 @@ function parseXhsPost(html, meta, finalUrl) {
     || postTitle.split(/[｜|-]/)[0].trim();
   const userId = read(/"user":\{[\s\S]{0,800}?"userId":"([^"]+)"/)
     || read(/"author":\{[\s\S]{0,800}?"userId":"([^"]+)"/);
-  const publishedAt = parsePublishedAt(html, meta);
+  const publishedAt = parseXhsPublishedAt(html, meta);
   const counts = parseXhsPostCounts(html);
   return {
     name,
@@ -498,6 +499,35 @@ function parseXhsPostCounts(html) {
   };
 }
 
+function parseXhsPublishedAt(html, meta = {}) {
+  const direct = [
+    meta.articlePublishedTime,
+    html.match(/<meta[^>]+itemprop=["']datePublished["'][^>]+content=["']([^"']+)["'][^>]*>/i)?.[1],
+    html.match(/"datePublished"\s*:\s*"([^"]+)"/i)?.[1],
+    html.match(/"uploadDate"\s*:\s*"([^"]+)"/i)?.[1]
+  ].filter(Boolean).map(decodeEntities).find(Boolean);
+  if (direct) return direct;
+
+  const keys = [
+    "publishTime",
+    "publish_time",
+    "publishDate",
+    "publishDateTime",
+    "firstPublishTime",
+    "notePublishTime",
+    "noteCreateTime",
+    "createTime",
+    "create_time",
+    "createdTime",
+    "created_at"
+  ];
+  for (const key of keys) {
+    const match = html.match(new RegExp(`"${key}"\\s*:\\s*"?([0-9]{10,13})"?`, "i"));
+    if (match?.[1]) return timestampToIso(match[1]);
+  }
+  return "";
+}
+
 function parsePublishedAt(html, meta = {}) {
   const direct = [
     meta.articlePublishedTime,
@@ -512,12 +542,14 @@ function parsePublishedAt(html, meta = {}) {
   const timestamp = [
     html.match(/"taken_at_timestamp"\s*:\s*(\d{10,13})/i)?.[1],
     html.match(/"taken_at"\s*:\s*(\d{10,13})/i)?.[1],
-    html.match(/"publishTime"\s*:\s*(\d{10,13})/i)?.[1],
-    html.match(/"lastUpdateTime"\s*:\s*(\d{10,13})/i)?.[1],
-    html.match(/"time"\s*:\s*(\d{13})/i)?.[1]
+    html.match(/"publishTime"\s*:\s*(\d{10,13})/i)?.[1]
   ].find(Boolean);
   if (!timestamp) return "";
-  const ms = timestamp.length === 10 ? Number(timestamp) * 1000 : Number(timestamp);
+  return timestampToIso(timestamp);
+}
+
+function timestampToIso(timestamp) {
+  const ms = String(timestamp).length === 10 ? Number(timestamp) * 1000 : Number(timestamp);
   return Number.isFinite(ms) ? new Date(ms).toISOString() : "";
 }
 

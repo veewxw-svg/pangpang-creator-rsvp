@@ -1058,7 +1058,7 @@
         postUrl: postRecord.postUrl || postRecord.link || booking.postUrl,
         postTitle: postRecord.postTitle || booking.postTitle || "",
         postPublishedAt: postRecord.postPublishedAt || booking.postPublishedAt || "",
-        postDateText: postRecord.postDateText || formatChineseDate(postRecord.postPublishedAt) || booking.postDateText || "",
+        postDateText: formatChineseDate(postRecord.postPublishedAt) || postRecord.postDateText || booking.postDateText || "",
         postLikes: postRecord.postLikes || booking.postLikes || "",
         postCollects: postRecord.postCollects || booking.postCollects || "",
         postComments: postRecord.postComments || booking.postComments || "",
@@ -1102,8 +1102,8 @@
         engagement: record.engagement || resolved.engagement || "",
         bio: record.bio || resolved.description || "",
         postTitle: record.postTitle || resolved.postTitle || "",
-        postPublishedAt: record.postPublishedAt || resolved.publishedAt || "",
-        postDateText: record.postDateText || formatChineseDate(resolved.publishedAt) || "",
+        postPublishedAt: resolved.publishedAt || record.postPublishedAt || "",
+        postDateText: formatChineseDate(resolved.publishedAt) || record.postDateText || "",
         postLikes: resolved.postLikes || record.postLikes || "",
         postCollects: resolved.postCollects || record.postCollects || "",
         postComments: resolved.postComments || record.postComments || "",
@@ -1174,8 +1174,8 @@
           postComments: resolved.postComments || record.postComments || "",
           postShares: resolved.postShares || record.postShares || "",
           postMetricsText: resolved.postMetricsText || record.postMetricsText || "",
-          postPublishedAt: record.postPublishedAt || resolved.publishedAt || "",
-          postDateText: record.postDateText || formatChineseDate(resolved.publishedAt) || ""
+          postPublishedAt: resolved.publishedAt || record.postPublishedAt || "",
+          postDateText: formatChineseDate(resolved.publishedAt) || record.postDateText || ""
         };
         Object.entries(updates).forEach(([key, value]) => {
           if (value && record[key] !== value) {
@@ -1494,7 +1494,7 @@
         ["博主名字", editableFact("name", record.name || record.handle || ""), true],
         ["主页链接", record.link ? renderLinkButton("查看主页", record.link) : "待补", true],
         ["帖子链接", record.postUrl ? renderLinkButton("查看帖子", record.postUrl) : "待补", true],
-        ["发布时间", editableFact("postDateText", record.postDateText || formatChineseDate(record.postPublishedAt) || ""), true],
+        ["发布时间", record.postDateText || formatChineseDate(record.postPublishedAt) || "待补"],
         ["帖子数据", record.postMetricsText || "待补"],
         ["粉丝", editableFact("followers", record.followers || ""), true],
         [record.platform === "Instagram" ? "帖子 / 关注" : "赞藏 / 总赞", editableFact("engagement", record.engagement || ""), true],
@@ -1549,9 +1549,6 @@
           state.pendingRecord.followers = value;
         } else if (field === "engagement") {
           state.pendingRecord.engagement = value;
-        } else if (field === "postDateText") {
-          state.pendingRecord.postDateText = value;
-          if (value) state.pendingRecord.postPublishedAt = "";
         }
       });
     }
