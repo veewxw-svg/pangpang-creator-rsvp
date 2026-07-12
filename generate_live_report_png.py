@@ -6,6 +6,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 RECORDS = Path(os.environ.get("PANGPANG_RECORDS_JSON", "data/records.json"))
 OUT = Path(os.environ.get("PANGPANG_REPORT_OUT", "output/pangpang_creator_report.png"))
+HIGHLIGHT_IDS = {item.strip() for item in os.environ.get("PANGPANG_HIGHLIGHT_IDS", "").split(",") if item.strip()}
 FONT_REG_CANDIDATES = [
     os.environ.get("PANGPANG_FONT_REG", ""),
     "/System/Library/Fonts/STHeiti Light.ttc",
@@ -216,7 +217,7 @@ metrics = [
     ("新增", str(sum(1 for r in records if normalize_status(r.get("status")) == "新增"))),
     ("已发布", str(sum(1 for r in records if normalize_status(r.get("status")) == "已发布"))),
     ("取消", str(sum(1 for r in records if normalize_status(r.get("status")) == "取消"))),
-    ("新更新", str(sum(1 for r in records if float(r.get("highlightUntil") or 0) > 0))),
+    ("本次高亮", str(sum(1 for r in records if str(r.get("id") or "") in HIGHLIGHT_IDS))),
 ]
 mx = 110
 for label, value in metrics:
@@ -258,7 +259,7 @@ for record in records:
         last_date = date
 
     status = normalize_status(record.get("status"))
-    highlighted = float(record.get("highlightUntil") or 0) > 0
+    highlighted = str(record.get("id") or "") in HIGHLIGHT_IDS
     if status == "已发布" and highlighted:
         fill = green_row
     elif status == "取消":

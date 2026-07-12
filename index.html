@@ -913,7 +913,7 @@
           state.records.unshift(record);
         }
         state.pendingRecord = null;
-        saveRecords();
+        saveRecords({ highlightIds: [record.id] });
         resetForm();
         statusLine.textContent = `${record.status === "已发布" ? "已更新为已发布" : (editingId ? "已更新" : "已保存")}：${record.dateText || "未填日期"} ${record.timeText || "未填时间"} ${displayCreatorName(record)}`;
         reviewPanel.classList.add("hidden");
@@ -1757,7 +1757,11 @@
         await fetch(apiEndpoint("/api/records"), {
           method: "POST",
           headers: { "Content-Type": "application/json", "Accept": "application/json" },
-          body: JSON.stringify({ records: state.records, silent: Boolean(options.silent) })
+          body: JSON.stringify({
+            records: state.records,
+            silent: Boolean(options.silent),
+            highlightIds: options.highlightIds || []
+          })
         });
       } catch {
         // Local storage remains the fallback when the backend is offline.

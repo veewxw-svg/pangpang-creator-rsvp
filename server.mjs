@@ -50,7 +50,8 @@ createServer(async (req, res) => {
       const body = await readJsonBody(req);
       const records = Array.isArray(body.records) ? body.records : [];
       await writeRecords(records);
-      const notification = body.silent ? { skipped: true, reason: "silent update" } : await maybeSendNotification(records);
+      const highlightIds = Array.isArray(body.highlightIds) ? body.highlightIds.map(String) : [];
+      const notification = body.silent ? { skipped: true, reason: "silent update" } : await maybeSendNotification(records, highlightIds);
       sendJson(res, { ok: true, count: records.length, reportUrl: "/api/report.png", notification });
       return;
     }
@@ -97,20 +98,21 @@ async function writeRecords(records) {
   await writeFile(recordsPath, JSON.stringify(records, null, 2), "utf8");
 }
 
-async function generateReportPng(records) {
+async function generateReportPng(records, highlightIds = []) {
   await mkdir(outputDir, { recursive: true });
   await writeRecords(records);
   await runFile(pythonBin, [reportScript], {
     env: {
       ...process.env,
       PANGPANG_RECORDS_JSON: recordsPath,
-      PANGPANG_REPORT_OUT: reportPath
+      PANGPANG_REPORT_OUT: reportPath,
+      PANGPANG_HIGHLIGHT_IDS: highlightIds.join(",")
     },
     maxBuffer: 1024 * 1024
   });
 }
 
-async function maybeSendNotification(records) {
+async function maybeSendNotification(records, highlightIds = []) {
   if (process.env.SEND_EMAILS !== "1") {
     return { sent: false, reason: "email disabled" };
   }
@@ -118,7 +120,7 @@ async function maybeSendNotification(records) {
     return { sent: false, reason: "missing email env" };
   }
 
-  await generateReportPng(records);
+  await generateReportPng(records, highlightIds);
   const image = await readFile(reportPath);
   const subject = process.env.NOTIFY_SUBJECT || "PangPang 博主探店预约更新";
   const siteUrl = process.env.PUBLIC_URL || "";
