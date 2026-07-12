@@ -1389,10 +1389,8 @@
     function renderRecord(record) {
       const status = normalizeStatus(record.status);
       const title = displayCreatorName(record);
-      const handleText = readableHandle(record.handle);
       const details = [
         record.platform,
-        handleText && handleText !== title ? handleText : "",
         record.followers ? `粉丝 ${record.followers}` : "",
         record.engagement ? `${record.platform === "Instagram" ? "数据" : "赞藏"} ${record.engagement}` : "",
         record.postDateText ? `发帖 ${record.postDateText}` : "",
