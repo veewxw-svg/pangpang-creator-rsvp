@@ -1,6 +1,7 @@
 import json
 import os
 import tempfile
+from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -138,7 +139,22 @@ def payment_text(record):
 
 
 def date_title(record):
-    return record.get("dateText") or record.get("dateISO") or "未填日期"
+    english = record.get("dateText") or ""
+    chinese = chinese_date(record.get("dateISO") or "")
+    if english and chinese:
+        return f"{english} · {chinese}"
+    return english or chinese or record.get("dateISO") or "未填日期"
+
+
+def chinese_date(date_iso):
+    if not date_iso:
+        return ""
+    try:
+        date = datetime.strptime(str(date_iso)[:10], "%Y-%m-%d")
+    except ValueError:
+        return ""
+    week = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"][date.weekday()]
+    return f"{date.year}年{date.month}月{date.day}日 {week}"
 
 
 def wrap_text(draw, text, font_obj, max_width, max_lines=2):
@@ -210,7 +226,7 @@ PAGE_W_PT, PAGE_H_PT = landscape(A4)
 PAGE_W = int(PAGE_W_PT * SCALE)
 PAGE_H = int(PAGE_H_PT * SCALE)
 M = 48
-HEADER_H = 252
+HEADER_H = 228
 DATE_H = 48
 CARD_H = 158
 GAP = 10
@@ -251,8 +267,7 @@ def new_page():
 
 def draw_header(draw):
     draw.text((M, 36), "PangPang 博主探店预约全局表", fill=BLACK, font=TITLE_FONT)
-    draw.text((M, 90), "PDF 邮件版｜按预约时间排序｜按钮可点击打开主页或帖子", fill=MUTED, font=SUB_FONT)
-    y = 124
+    y = 106
     metric_h = 90
     draw.rounded_rectangle((M, y, PAGE_W - M, y + metric_h), radius=22, fill=PANEL)
     metrics = [
