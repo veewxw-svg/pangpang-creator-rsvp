@@ -350,15 +350,7 @@ async function fetchInstagramProfileJson(target, finalUrl) {
   if (!username) return {};
   try {
     const apiUrl = `https://www.instagram.com/api/v1/users/web_profile_info/?username=${encodeURIComponent(username)}`;
-    const response = await fetch(apiUrl, {
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36",
-        "Accept": "application/json",
-        "x-ig-app-id": "936619743392459"
-      }
-    });
-    if (!response.ok) return {};
-    const json = await response.json();
+    const json = await fetchInstagramJson(apiUrl);
     const user = json?.data?.user;
     if (!user) return {};
     const followers = user.edge_followed_by?.count;
@@ -378,6 +370,34 @@ async function fetchInstagramProfileJson(target, finalUrl) {
   } catch {
     return {};
   }
+}
+
+async function fetchInstagramJson(apiUrl) {
+  const headers = {
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36",
+    "Accept": "application/json",
+    "x-ig-app-id": "936619743392459"
+  };
+  try {
+    const response = await fetch(apiUrl, { headers });
+    if (response.ok) return await response.json();
+  } catch {
+    // Fall through to curl. Instagram sometimes treats server fetch and curl differently.
+  }
+  const { stdout } = await runFile("curl", [
+    "-L",
+    "-sS",
+    "--max-time",
+    "15",
+    "-A",
+    headers["User-Agent"],
+    "-H",
+    `Accept: ${headers.Accept}`,
+    "-H",
+    `x-ig-app-id: ${headers["x-ig-app-id"]}`,
+    apiUrl
+  ], { maxBuffer: 4 * 1024 * 1024 });
+  return JSON.parse(stdout);
 }
 
 function extractInstagramUsername(value) {
