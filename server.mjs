@@ -252,6 +252,7 @@ async function resolveProfile(target) {
     const xhsPost = parseXhsPost(html, meta, finalUrl);
     const instagram = parseInstagramMeta(meta, html, finalUrl);
     const isXhs = /xiaohongshu\.com|xhslink\.com/i.test(finalUrl);
+    const isInstagramPost = /instagram\.com|instagr\.am/i.test(finalUrl) && /\/(?:p|reel|reels)\//i.test(finalUrl);
     const publishedAt = instagram.publishedAt || xhsPost.publishedAt || (isXhs ? "" : parsePublishedAt(html, meta));
     const combined = [meta.title, meta.description, meta.ogTitle, meta.ogDescription, stripTags(html).slice(0, 3000)].filter(Boolean).join("\n");
     const parsed = parseSharedText(combined, finalUrl);
@@ -260,10 +261,10 @@ async function resolveProfile(target) {
     return {
       ok: true,
       finalUrl,
-      profileUrl: instagramJson.profileUrl || instagram.profileUrl || xhsPost.profileUrl || parsed.profileUrl || finalUrl,
+      profileUrl: instagramJson.profileUrl || instagram.profileUrl || xhsPost.profileUrl || (isInstagramPost ? "" : parsed.profileUrl) || finalUrl,
       postUrl: instagram.postUrl || xhsPost.postUrl || parsed.postUrl || "",
       platform: instagramJson.platform || instagram.platform || parsed.platform,
-      handle: instagramJson.handle || instagram.handle || xhsPost.handle || parsed.handle,
+      handle: instagramJson.handle || instagram.handle || xhsPost.handle || (isInstagramPost ? "" : parsed.handle),
       name: instagramJson.name || instagram.name || xhsPost.name || ssr.name || parsed.name || titleName,
       followers: instagramJson.followers || instagram.followers || ssr.followers || (parsed.followers && parsed.followers !== "1" ? parsed.followers : ""),
       engagement: instagramJson.engagement || instagram.engagement || ssr.engagement || parsed.engagement,
@@ -387,7 +388,8 @@ function parseInstagramMeta(meta, html, finalUrl) {
   const postTitleMatch = title.match(/^(.+?)\s+on Instagram\s*:/i) || description.match(/-\s*(.+?)\s+on Instagram\s*:/i);
   const stats = readInstagramStats([description, fallback, title, stripTags(html).slice(0, 3000)].filter(Boolean));
   const bioMatch = description.match(/on Instagram:\s*"([^"]*)"/i);
-  const urlHandle = finalUrl.match(/instagram\.com\/([^/?#]+)/i)?.[1] || "";
+  const rawUrlHandle = finalUrl.match(/instagram\.com\/([^/?#]+)/i)?.[1] || "";
+  const urlHandle = isInstagramReservedSegment(rawUrlHandle) ? "" : rawUrlHandle;
   const handle = titleMatch?.[2] || descMatch?.[2] || urlHandle;
   const following = stats.following || "";
   const postCount = stats.postCount || "";
@@ -476,8 +478,12 @@ async function fetchInstagramJson(apiUrl) {
 function extractInstagramUsername(value) {
   const match = String(value || "").match(/instagram\.com\/([^/?#]+)/i);
   const username = match?.[1]?.replace(/^@/, "") || "";
-  if (!username || ["accounts", "p", "reel", "reels", "explore", "stories"].includes(username.toLowerCase())) return "";
+  if (!username || isInstagramReservedSegment(username)) return "";
   return decodeURIComponent(username);
+}
+
+function isInstagramReservedSegment(value) {
+  return ["accounts", "p", "reel", "reels", "explore", "stories", "tv"].includes(String(value || "").toLowerCase());
 }
 
 function readInstagramStats(sources) {

@@ -381,7 +381,7 @@
       overflow-wrap: anywhere;
     }
 
-    .fact input {
+    .fact input, .fact select {
       width: 100%;
       margin-top: 7px;
       border: 0;
@@ -395,7 +395,7 @@
       outline: 1px solid transparent;
     }
 
-    .fact input:focus {
+    .fact input:focus, .fact select:focus {
       outline-color: var(--blue);
     }
 
@@ -787,6 +787,7 @@
     const state = {
       records: loadRecords(),
       pendingRecord: null,
+      pendingPostRecord: null,
       editingId: "",
       mode: "booking"
     };
@@ -862,14 +863,17 @@
       if (!state.editingId && enriched.type === "post" && enriched.ok !== false) {
         const matched = findMatchingBooking(enriched);
         if (!matched) {
+          state.pendingPostRecord = enriched;
           state.pendingRecord = null;
-          reviewPanel.classList.add("hidden");
-          statusLine.textContent = "没有找到对应的原预约。请先确认这位博主已经在预约记录里，或点原预约的编辑来更新。";
+          statusLine.textContent = "平台没有给出明确作者，请选择这条帖子要更新到哪位博主";
+          renderPostMatchChooser(enriched);
           return;
         }
         state.editingId = matched.id;
+        state.pendingPostRecord = null;
         state.pendingRecord = mergePostIntoBooking(matched, enriched);
       } else {
+        state.pendingPostRecord = null;
         state.pendingRecord = enriched;
       }
       statusLine.textContent = state.pendingRecord.resolveMessage || "已识别信息，请在右侧确认后保存";
@@ -899,6 +903,20 @@
       if (action === "back") {
         reviewPanel.classList.add("hidden");
         statusLine.textContent = "可以继续修改后再确认";
+        return;
+      }
+      if (action === "match-post" && state.pendingPostRecord) {
+        const selectedId = $("manualMatchId")?.value || "";
+        const matched = state.records.find((item) => item.id === selectedId);
+        if (!matched) {
+          statusLine.textContent = "请先选择要更新的原预约";
+          return;
+        }
+        state.editingId = matched.id;
+        state.pendingRecord = mergePostIntoBooking(matched, state.pendingPostRecord);
+        state.pendingPostRecord = null;
+        statusLine.textContent = state.pendingRecord.resolveMessage || "已匹配原预约，请确认后保存";
+        renderReview(state.pendingRecord);
         return;
       }
       if (action === "save" && state.pendingRecord) {
@@ -978,6 +996,7 @@
       feeAmount.value = "";
       remarks.value = "";
       state.pendingRecord = null;
+      state.pendingPostRecord = null;
       state.editingId = "";
       setMode("booking");
       reviewPanel.classList.add("hidden");
@@ -1013,10 +1032,14 @@
     }
 
     function findMatchingBooking(postRecord) {
-      return state.records.find((item) => {
+      return getPostMatchCandidates().find((item) => sameCreator(item, postRecord));
+    }
+
+    function getPostMatchCandidates() {
+      return state.records.filter((item) => {
         if (item.id === state.editingId || normalizeStatus(item.status) === "取消") return false;
         if (item.type === "post") return false;
-        return sameCreator(item, postRecord);
+        return true;
       });
     }
 
@@ -1091,6 +1114,43 @@
         resolveStatus: "已匹配原预约",
         resolveMessage: "已找到原预约，会更新在同一条记录里，请确认后保存"
       };
+    }
+
+    function renderPostMatchChooser(postRecord) {
+      const candidates = getPostMatchCandidates();
+      reviewPanel.classList.remove("hidden");
+      reviewPanel.innerHTML = `<div class="review-head">
+        <div>
+          <h2>选择原预约</h2>
+          <p>Instagram 没有公开返回这条帖子的作者账号，请选择它对应的预约，系统会更新在同一条记录里。</p>
+        </div>
+        <span class="chip 已发布">已发布</span>
+      </div>
+      <div class="review-grid">
+        <div class="fact"><span>帖子链接</span><b>${postRecord.postUrl ? renderLinkButton("查看帖子", postRecord.postUrl) : "待补"}</b></div>
+        <div class="fact"><span>帖子标题</span><b>${escapeHtml(postRecord.postTitle || "待补")}</b></div>
+        <div class="fact"><span>更新到</span><b>
+          <select id="manualMatchId">
+            <option value="">请选择原预约</option>
+            ${candidates.map((item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(matchOptionLabel(item))}</option>`).join("")}
+          </select>
+        </b></div>
+      </div>
+      <div class="review-actions">
+        <button class="secondary" type="button" data-review-action="back">返回修改</button>
+        <button class="primary" type="button" data-review-action="match-post">更新到这条预约</button>
+      </div>`;
+      reviewPanel.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+
+    function matchOptionLabel(record) {
+      return [
+        displayCreatorName(record),
+        record.platform || "",
+        record.dateText || "",
+        record.timeText || "",
+        record.phone ? `电话 ${record.phone}` : ""
+      ].filter(Boolean).join(" · ");
     }
 
     async function enrichRecord(record) {
