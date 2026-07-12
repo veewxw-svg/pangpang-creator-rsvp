@@ -212,7 +212,7 @@ PAGE_H = int(PAGE_H_PT * SCALE)
 M = 48
 HEADER_H = 252
 DATE_H = 48
-CARD_H = 136
+CARD_H = 158
 GAP = 10
 
 BLACK = "#1d1d1f"
@@ -233,7 +233,7 @@ ORANGE_ROW = "#fff8e8"
 TITLE_FONT = font(42, True)
 SUB_FONT = font(18)
 METRIC_FONT = font(28, True)
-METRIC_LABEL_FONT = font(15)
+METRIC_LABEL_FONT = font(14)
 DATE_FONT = font(25, True)
 NAME_FONT = font(24, True)
 BODY_FONT = font(18)
@@ -253,7 +253,8 @@ def draw_header(draw):
     draw.text((M, 36), "PangPang 博主探店预约全局表", fill=BLACK, font=TITLE_FONT)
     draw.text((M, 90), "PDF 邮件版｜按预约时间排序｜按钮可点击打开主页或帖子", fill=MUTED, font=SUB_FONT)
     y = 124
-    draw.rounded_rectangle((M, y, PAGE_W - M, y + 82), radius=22, fill=PANEL)
+    metric_h = 90
+    draw.rounded_rectangle((M, y, PAGE_W - M, y + metric_h), radius=22, fill=PANEL)
     metrics = [
         ("总记录", len(records)),
         ("新增", sum(1 for r in records if normalize_status(r.get("status")) == "新增")),
@@ -264,8 +265,8 @@ def draw_header(draw):
     x = M + 34
     step = (PAGE_W - M * 2 - 68) / 5
     for label, value in metrics:
-        draw.text((x, y + 14), str(value), fill=BLACK, font=METRIC_FONT)
-        draw.text((x, y + 50), label, fill=SOFT, font=METRIC_LABEL_FONT)
+        draw.text((x, y + 12), str(value), fill=BLACK, font=METRIC_FONT)
+        draw.text((x, y + 54), label, fill=SOFT, font=METRIC_LABEL_FONT)
         x += step
 
 
@@ -300,32 +301,35 @@ def draw_record(draw, links, record, y):
 
     status_color = PURPLE if status == "已发布" else RED if status == "取消" else GREEN
     draw.text((x0 + 24, y + 24), record.get("timeText") or "--", fill=BLACK, font=NAME_FONT)
-    draw.text((x0 + 24, y + 58), f"{record.get('pax') or '?'} pax", fill=SOFT, font=BODY_FONT)
-    draw_chip(draw, x0 + 24, y + 86, status, "#e8f3ec" if status == "新增" else "#ececff" if status == "已发布" else "#ffe8ea", status_color, CHIP_FONT)
+    draw.text((x0 + 24, y + 60), f"{record.get('pax') or '?'} pax", fill=SOFT, font=BODY_FONT)
+    draw_chip(draw, x0 + 24, y + 94, status, "#e8f3ec" if status == "新增" else "#ececff" if status == "已发布" else "#ffe8ea", status_color, CHIP_FONT)
     if duplicate:
-        draw_chip(draw, x0 + 94, y + 86, "重复", "#fff0d6", YELLOW, CHIP_FONT)
+        draw_chip(draw, x0 + 94, y + 94, "重复", "#fff0d6", YELLOW, CHIP_FONT)
 
     main_x = x0 + 178
     button_x = x1 - 300
     max_main_width = button_x - main_x - 28
     draw_wrapped(draw, (main_x, y + 18), display_name(record), NAME_FONT, BLACK, max_main_width, 1)
-    details = [
+    line_one = [
         record.get("platform") or "",
         f"粉丝 {record.get('followers')}" if record.get("followers") else "",
         f"{'数据' if record.get('platform') == 'Instagram' else '赞藏'} {record.get('engagement')}" if record.get("engagement") else "",
+    ]
+    line_two = [
         f"帖子数据 {record.get('postMetricsText')}" if record.get("postMetricsText") else "",
         f"发帖 {record.get('postDateText')}" if record.get("postDateText") else "",
         payment_text(record),
         f"电话 {record.get('phone')}" if record.get("phone") else "",
     ]
     if duplicate:
-        details.insert(0, "重复博主")
-    draw_wrapped(draw, (main_x, y + 54), " · ".join([item for item in details if item]) or "资料待补", BODY_FONT, MUTED, max_main_width, 2)
+        line_one.insert(0, "重复博主")
+    draw_wrapped(draw, (main_x, y + 56), " · ".join([item for item in line_one if item]) or "资料待补", BODY_FONT, MUTED, max_main_width, 1)
+    draw_wrapped(draw, (main_x, y + 86), " · ".join([item for item in line_two if item]) or "资料待补", BODY_FONT, MUTED, max_main_width, 1)
     remarks = record.get("remarks") or ""
     if remarks:
-        draw_wrapped(draw, (main_x, y + 106), remarks, SMALL_FONT, SOFT, max_main_width, 1)
+        draw_wrapped(draw, (main_x, y + 118), remarks, SMALL_FONT, SOFT, max_main_width, 1)
 
-    button_y = y + 22
+    button_y = y + 32
     if record.get("link"):
         add_link(links, draw_button(draw, button_x, button_y, "查看主页"), record.get("link"))
         button_y += 52
