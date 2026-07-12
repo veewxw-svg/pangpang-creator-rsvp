@@ -194,6 +194,7 @@ async function resolveProfile(target) {
     const ssr = parseXhsSsr(html);
     const xhsPost = parseXhsPost(html, meta, finalUrl);
     const instagram = parseInstagramMeta(meta, html, finalUrl);
+    const instagramJson = await fetchInstagramProfileJson(target, finalUrl);
     const publishedAt = instagram.publishedAt || xhsPost.publishedAt || parsePublishedAt(html, meta);
     const combined = [meta.title, meta.description, meta.ogTitle, meta.ogDescription, stripTags(html).slice(0, 3000)].filter(Boolean).join("\n");
     const parsed = parseSharedText(combined, finalUrl);
@@ -202,17 +203,17 @@ async function resolveProfile(target) {
     return {
       ok: true,
       finalUrl,
-      profileUrl: instagram.profileUrl || xhsPost.profileUrl || parsed.profileUrl || finalUrl,
+      profileUrl: instagramJson.profileUrl || instagram.profileUrl || xhsPost.profileUrl || parsed.profileUrl || finalUrl,
       postUrl: instagram.postUrl || xhsPost.postUrl || parsed.postUrl || "",
-      platform: instagram.platform || parsed.platform,
-      handle: instagram.handle || xhsPost.handle || parsed.handle,
-      name: instagram.name || xhsPost.name || ssr.name || parsed.name || titleName,
-      followers: instagram.followers || ssr.followers || (parsed.followers && parsed.followers !== "1" ? parsed.followers : ""),
-      engagement: instagram.engagement || ssr.engagement || parsed.engagement,
-      following: instagram.following || "",
-      postCount: instagram.postCount || "",
+      platform: instagramJson.platform || instagram.platform || parsed.platform,
+      handle: instagramJson.handle || instagram.handle || xhsPost.handle || parsed.handle,
+      name: instagramJson.name || instagram.name || xhsPost.name || ssr.name || parsed.name || titleName,
+      followers: instagramJson.followers || instagram.followers || ssr.followers || (parsed.followers && parsed.followers !== "1" ? parsed.followers : ""),
+      engagement: instagramJson.engagement || instagram.engagement || ssr.engagement || parsed.engagement,
+      following: instagramJson.following || instagram.following || "",
+      postCount: instagramJson.postCount || instagram.postCount || "",
       redId: ssr.redId || "",
-      description: instagram.description || xhsPost.description || ssr.description || "",
+      description: instagramJson.description || instagram.description || xhsPost.description || ssr.description || "",
       postTitle: instagram.postTitle || xhsPost.postTitle || parsed.postTitle,
       publishedAt,
       sourceTitle: meta.title || meta.ogTitle || ""
@@ -342,6 +343,48 @@ function parseInstagramMeta(meta, html, finalUrl) {
     postTitle: title.replace(/\s*•\s*Instagram.*/i, "").trim(),
     publishedAt
   };
+}
+
+async function fetchInstagramProfileJson(target, finalUrl) {
+  const username = extractInstagramUsername(target) || extractInstagramUsername(finalUrl);
+  if (!username) return {};
+  try {
+    const apiUrl = `https://www.instagram.com/api/v1/users/web_profile_info/?username=${encodeURIComponent(username)}`;
+    const response = await fetch(apiUrl, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36",
+        "Accept": "application/json",
+        "x-ig-app-id": "936619743392459"
+      }
+    });
+    if (!response.ok) return {};
+    const json = await response.json();
+    const user = json?.data?.user;
+    if (!user) return {};
+    const followers = user.edge_followed_by?.count;
+    const following = user.edge_follow?.count;
+    const postCount = user.edge_owner_to_timeline_media?.count;
+    return {
+      platform: "Instagram",
+      profileUrl: `https://www.instagram.com/${user.username || username}/`,
+      handle: user.username ? `@${user.username}` : `@${username}`,
+      name: user.full_name || user.username || username,
+      followers: Number.isFinite(followers) ? normalizeNumber(followers, "") : "",
+      following: Number.isFinite(following) ? normalizeNumber(following, "") : "",
+      postCount: Number.isFinite(postCount) ? normalizeNumber(postCount, "") : "",
+      engagement: `${Number.isFinite(postCount) ? normalizeNumber(postCount, "") : "0"} posts · ${Number.isFinite(following) ? normalizeNumber(following, "") : "0"} following`,
+      description: user.biography || ""
+    };
+  } catch {
+    return {};
+  }
+}
+
+function extractInstagramUsername(value) {
+  const match = String(value || "").match(/instagram\.com\/([^/?#]+)/i);
+  const username = match?.[1]?.replace(/^@/, "") || "";
+  if (!username || ["accounts", "p", "reel", "reels", "explore", "stories"].includes(username.toLowerCase())) return "";
+  return decodeURIComponent(username);
 }
 
 function readInstagramStats(sources) {
