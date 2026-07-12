@@ -380,6 +380,24 @@
       overflow-wrap: anywhere;
     }
 
+    .fact input {
+      width: 100%;
+      margin-top: 7px;
+      border: 0;
+      border-radius: 10px;
+      background: #fff;
+      padding: 10px 11px;
+      font: inherit;
+      font-size: 16px;
+      font-weight: 650;
+      color: var(--ink);
+      outline: 1px solid transparent;
+    }
+
+    .fact input:focus {
+      outline-color: var(--blue);
+    }
+
     .review-actions {
       display: flex;
       gap: 8px;
@@ -846,6 +864,7 @@
         return;
       }
       if (action === "save" && state.pendingRecord) {
+        applyReviewEdits();
         const editingId = state.editingId;
         const record = editingId
           ? { ...state.pendingRecord, id: editingId, createdAt: new Date().toISOString(), highlightUntil: Date.now() + 72 * 60 * 60 * 1000 }
@@ -1381,12 +1400,12 @@
       const facts = record.postUrl ? [
         ["信息类型", "更新原预约为已发布"],
         ["识别状态", record.resolveStatus || (record.link ? "分享文字识别" : "未检测到链接")],
-        ["博主名字", record.name || record.handle || "待确认"],
+        ["博主名字", editableFact("name", record.name || record.handle || ""), true],
         ["主页链接", record.link ? renderLinkButton("查看主页", record.link) : "待补", true],
         ["帖子链接", record.postUrl ? renderLinkButton("查看帖子", record.postUrl) : "待补", true],
         ["发布时间", record.postDateText || formatChineseDate(record.postPublishedAt) || "待补"],
-        ["粉丝", record.followers || "待补"],
-        [record.platform === "Instagram" ? "帖子 / 关注" : "赞藏 / 总赞", record.engagement || "待补"],
+        ["粉丝", editableFact("followers", record.followers || ""), true],
+        [record.platform === "Instagram" ? "帖子 / 关注" : "赞藏 / 总赞", editableFact("engagement", record.engagement || ""), true],
         ["预约时间", [record.dateText, record.timeText].filter(Boolean).join(" ") || "待补"],
         ["人数", record.pax ? `${record.pax} pax` : "待补"],
         ["电话", record.phone || "待补"],
@@ -1395,10 +1414,10 @@
       ] : [
         ["信息类型", "探店预约"],
         ["识别状态", record.resolveStatus || (record.link ? "分享文字识别" : "未检测到链接")],
-        ["博主名字", record.name || record.handle || "待确认"],
+        ["博主名字", editableFact("name", record.name || record.handle || ""), true],
         ["主页链接", record.link ? renderLinkButton("查看主页", record.link) : "待补", true],
-        ["粉丝", record.followers || "待补"],
-        [record.platform === "Instagram" ? "帖子 / 关注" : "赞藏 / 总赞", record.engagement || "待补"],
+        ["粉丝", editableFact("followers", record.followers || ""), true],
+        [record.platform === "Instagram" ? "帖子 / 关注" : "赞藏 / 总赞", editableFact("engagement", record.engagement || ""), true],
         ["时间", [record.dateText, record.timeText].filter(Boolean).join(" ") || "待补"],
         ["人数", record.pax ? `${record.pax} pax` : "待补"],
         ["电话", record.phone || "待补"],
@@ -1419,6 +1438,25 @@
         <button class="primary" type="button" data-review-action="save">确定保存</button>
       </div>`;
       reviewPanel.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+
+    function editableFact(field, value) {
+      return `<input data-review-field="${escapeHtml(field)}" value="${escapeHtml(value || "")}" placeholder="手动填写">`;
+    }
+
+    function applyReviewEdits() {
+      if (!state.pendingRecord) return;
+      reviewPanel.querySelectorAll("[data-review-field]").forEach((input) => {
+        const field = input.dataset.reviewField;
+        const value = input.value.trim();
+        if (field === "name") {
+          state.pendingRecord.name = value;
+        } else if (field === "followers") {
+          state.pendingRecord.followers = value;
+        } else if (field === "engagement") {
+          state.pendingRecord.engagement = value;
+        }
+      });
     }
 
     function renderReport() {
