@@ -1,6 +1,7 @@
 import json
 import os
 from pathlib import Path
+from urllib.parse import urlparse
 from PIL import Image, ImageDraw, ImageFont
 
 
@@ -36,6 +37,46 @@ def normalize_status(value):
     if value == "取消":
         return "取消"
     return "新增"
+
+
+def normalize_loose(value):
+    return "".join(str(value or "").strip().lower().split())
+
+
+def normalize_profile_url(value):
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    try:
+        parsed = urlparse(raw)
+        host = parsed.netloc.lower().removeprefix("www.")
+        path = parsed.path.rstrip("/").lower()
+        return f"{host}{path}" if host or path else ""
+    except Exception:
+        return normalize_loose(raw.split("?")[0].split("#")[0])
+
+
+def duplicate_key(record):
+    if not record or normalize_status(record.get("status")) == "取消":
+        return ""
+    profile = normalize_profile_url(record.get("link") or record.get("profileUrl") or "")
+    if profile:
+        return f"url:{profile}"
+    platform = normalize_loose(record.get("platform"))
+    handle = normalize_loose(str(record.get("handle") or "").lstrip("@"))
+    if platform and handle:
+        return f"handle:{platform}:{handle}"
+    name = normalize_loose(record.get("name"))
+    return f"name:{platform}:{name}" if platform and name else ""
+
+
+def duplicate_ids(records):
+    counts = {}
+    for record in records:
+        key = duplicate_key(record)
+        if key:
+            counts[key] = counts.get(key, 0) + 1
+    return {str(record.get("id") or "") for record in records if counts.get(duplicate_key(record), 0) > 1}
 
 
 def sort_minutes(value):
@@ -171,6 +212,7 @@ except Exception:
 
 records = [record for record in records if not is_invalid_draft(record)]
 records = sorted(records, key=lambda r: (status_sort_rank(r), r.get("dateISO") or "9999-99-99", sort_minutes(r.get("timeText"))))
+DUPLICATE_IDS = duplicate_ids(records)
 
 W = 2480
 row_h = 108
@@ -196,6 +238,7 @@ header_bg = "#f5f5f7"
 blue_row = "#eef6ff"
 green_row = "#effaf2"
 red_row = "#fff1f1"
+orange_row = "#fff8e8"
 red = "#d70015"
 green = "#248a3d"
 blue = "#0071e3"
@@ -260,12 +303,15 @@ for record in records:
 
     status = normalize_status(record.get("status"))
     highlighted = str(record.get("id") or "") in HIGHLIGHT_IDS
+    duplicate = str(record.get("id") or "") in DUPLICATE_IDS
     if status == "已发布" and highlighted:
         fill = green_row
     elif status == "取消":
         fill = red_row
     elif highlighted:
         fill = blue_row
+    elif duplicate:
+        fill = orange_row
     else:
         fill = "#ffffff"
 
@@ -273,7 +319,7 @@ for record in records:
     d.line((x0 + 16, y + row_h - 8, right - 16, y + row_h - 8), fill=line, width=1)
 
     values = [
-        status,
+        " / ".join([status, "重复"] if duplicate else [status]),
         record.get("timeText") or "-",
         display_name(record),
         record.get("platform") or "待补",
@@ -293,7 +339,7 @@ for record in records:
         color = black
         if value == "取消":
             color = red
-        elif value == "已发布":
+        elif "已发布" in str(value):
             color = purple
         elif "查看" in str(value):
             color = blue
@@ -312,7 +358,7 @@ for record in records:
     y += row_h
 
 d.rounded_rectangle((70, H - 160, 2410, H - 72), radius=22, fill=header_bg)
-d.text((102, H - 133), "颜色说明：浅蓝=本次新增预约｜浅绿=本次发帖更新｜浅红=取消但保留记录。邮件正文可放真实主页/帖子按钮。", fill=muted, font=small_f)
+d.text((102, H - 133), "颜色说明：浅蓝=本次新增预约｜浅绿=本次发帖更新｜浅红=取消但保留记录｜浅橙=重复博主。", fill=muted, font=small_f)
 d.text((70, H - 40), "后台保留完整数据；这张 PNG 用来给手机和电脑快速看全局。", fill=muted, font=tiny_f)
 
 OUT.parent.mkdir(parents=True, exist_ok=True)

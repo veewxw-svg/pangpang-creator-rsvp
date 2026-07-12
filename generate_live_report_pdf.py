@@ -1,6 +1,7 @@
 import json
 import os
 from pathlib import Path
+from urllib.parse import urlparse
 
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A3, landscape
@@ -54,6 +55,46 @@ def normalize_status(value):
     if value == "取消":
         return "取消"
     return "新增"
+
+
+def normalize_loose(value):
+    return "".join(str(value or "").strip().lower().split())
+
+
+def normalize_profile_url(value):
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    try:
+        parsed = urlparse(raw)
+        host = parsed.netloc.lower().removeprefix("www.")
+        path = parsed.path.rstrip("/").lower()
+        return f"{host}{path}" if host or path else ""
+    except Exception:
+        return normalize_loose(raw.split("?")[0].split("#")[0])
+
+
+def duplicate_key(record):
+    if not record or normalize_status(record.get("status")) == "取消":
+        return ""
+    profile = normalize_profile_url(record.get("link") or record.get("profileUrl") or "")
+    if profile:
+        return f"url:{profile}"
+    platform = normalize_loose(record.get("platform"))
+    handle = normalize_loose(str(record.get("handle") or "").lstrip("@"))
+    if platform and handle:
+        return f"handle:{platform}:{handle}"
+    name = normalize_loose(record.get("name"))
+    return f"name:{platform}:{name}" if platform and name else ""
+
+
+def duplicate_ids(records):
+    counts = {}
+    for record in records:
+        key = duplicate_key(record)
+        if key:
+            counts[key] = counts.get(key, 0) + 1
+    return {str(record.get("id") or "") for record in records if counts.get(duplicate_key(record), 0) > 1}
 
 
 def sort_minutes(value):
@@ -167,6 +208,7 @@ except Exception:
 
 records = [record for record in records if not is_invalid_draft(record)]
 records = sorted(records, key=lambda r: (status_sort_rank(r), r.get("dateISO") or "9999-99-99", sort_minutes(r.get("timeText"))))
+DUPLICATE_IDS = duplicate_ids(records)
 
 OUT.parent.mkdir(parents=True, exist_ok=True)
 c = canvas.Canvas(str(OUT), pagesize=landscape(A3))
@@ -202,6 +244,7 @@ header_bg = colors.HexColor("#f5f5f7")
 blue_row = colors.HexColor("#eef6ff")
 green_row = colors.HexColor("#effaf2")
 red_row = colors.HexColor("#fff1f1")
+orange_row = colors.HexColor("#fff8e8")
 
 
 def draw_header():
@@ -268,17 +311,20 @@ for record in records:
     status = normalize_status(record.get("status"))
     highlighted = str(record.get("id") or "") in HIGHLIGHT_IDS
     fill = colors.white
+    duplicate = str(record.get("id") or "") in DUPLICATE_IDS
     if status == "已发布" and highlighted:
         fill = green_row
     elif status == "取消":
         fill = red_row
     elif highlighted:
         fill = blue_row
+    elif duplicate:
+        fill = orange_row
     c.setFillColor(fill)
     c.roundRect(margin, y - row_h + 8, page_w - margin * 2, row_h - 4, 6, fill=1, stroke=0)
 
     values = [
-        status,
+        " / ".join([status, "重复"] if duplicate else [status]),
         record.get("timeText") or "-",
         display_name(record),
         record.get("platform") or "待补",
@@ -293,7 +339,7 @@ for record in records:
 
     x = margin + 8
     for idx, (text, (_, width)) in enumerate(zip(values, cols)):
-        color = purple if text == "已发布" else green_text if idx == 8 and text != "待补" else black
+        color = purple if "已发布" in str(text) else green_text if idx == 8 and text != "待补" else black
         size = 8 if idx in (5, 6, 10) else 9
         font_name = FONT_BOLD if idx == 0 else FONT
         draw_text(c, x, y - 10, text, font_name, size, color, width - 5, 2)
@@ -311,6 +357,6 @@ for record in records:
 
 c.setFillColor(muted)
 c.setFont(FONT, 8)
-c.drawString(margin, 26, "颜色说明：浅蓝=本次新增预约｜浅绿=本次发帖更新｜浅红=取消但保留记录。")
+c.drawString(margin, 26, "颜色说明：浅蓝=本次新增预约｜浅绿=本次发帖更新｜浅红=取消但保留记录｜浅橙=重复博主。")
 c.save()
 print(OUT)

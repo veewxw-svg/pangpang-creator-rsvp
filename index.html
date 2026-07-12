@@ -576,6 +576,7 @@
     .chip.修改 { background: rgba(168, 111, 0, .12); color: var(--yellow); }
     .chip.取消 { background: rgba(215, 0, 21, .1); color: var(--red); }
     .chip.已发布 { background: rgba(88, 86, 214, .12); color: #5856d6; }
+    .chip.重复 { background: rgba(168, 111, 0, .14); color: var(--yellow); }
 
     .actions {
       display: grid;
@@ -1397,18 +1398,19 @@
       const booking = all.filter((item) => normalizeStatus(item.status) === "新增").length;
       const cancelled = all.filter((item) => normalizeStatus(item.status) === "取消").length;
       const published = all.filter((item) => normalizeStatus(item.status) === "已发布").length;
-      const updates = all.filter((item) => isHighlighted(item)).length;
+      const duplicates = all.filter((item) => isDuplicateRecord(item)).length;
       summary.innerHTML = [
         ["总记录", all.length],
         ["新增", booking],
         ["取消", cancelled],
         ["已发布", published],
-        ["新更新", updates]
+        ["重复", duplicates]
       ].map(([label, value]) => `<div class="metric"><strong>${value}</strong><span>${label}</span></div>`).join("");
     }
 
     function renderRecord(record) {
       const status = normalizeStatus(record.status);
+      const duplicate = isDuplicateRecord(record);
       const title = displayCreatorName(record);
       const details = [
         record.platform,
@@ -1428,10 +1430,11 @@
           <div class="time">${escapeHtml(record.timeText || "--")}</div>
           <div class="pax">${escapeHtml(`${record.pax || "?"} pax`)}</div>
           <span class="chip ${escapeHtml(status)}">${escapeHtml(status)}</span>
+          ${duplicate ? '<span class="chip 重复">重复</span>' : ""}
         </div>
         <div class="creator">
           <b>${escapeHtml(title)}</b>
-          <div class="meta">${escapeHtml(details || "资料待补")}</div>
+          <div class="meta">${escapeHtml([duplicate ? "重复博主" : "", details || "资料待补"].filter(Boolean).join(" · "))}</div>
           <div class="meta">${escapeHtml(status === "已发布" ? "已发帖 · " : "")}提交人：${escapeHtml(record.submitter || record.owner || "未填写")}</div>
           ${linkButtons ? `<div class="link-row">${linkButtons}</div>` : ""}
         </div>
@@ -1446,6 +1449,45 @@
       if (status === "已发布") return "已发布";
       if (status === "取消") return "取消";
       return "新增";
+    }
+
+    function duplicateKey(record) {
+      if (!record || normalizeStatus(record.status) === "取消") return "";
+      const profile = normalizeProfileUrl(record.link || record.profileUrl || "");
+      if (profile) return `url:${profile}`;
+      const platform = normalizeLooseText(record.platform || "");
+      const handle = normalizeLooseText(record.handle || "");
+      if (platform && handle) return `handle:${platform}:${handle.replace(/^@/, "")}`;
+      const name = normalizeLooseText(record.name || "");
+      return platform && name ? `name:${platform}:${name}` : "";
+    }
+
+    function normalizeProfileUrl(value) {
+      const raw = String(value || "").trim();
+      if (!raw) return "";
+      try {
+        const url = new URL(raw);
+        return `${url.hostname.replace(/^www\./, "").toLowerCase()}${url.pathname.replace(/\/+$/, "").toLowerCase()}`;
+      } catch {
+        return normalizeLooseText(raw.split(/[?#]/)[0]);
+      }
+    }
+
+    function normalizeLooseText(value) {
+      return String(value || "").trim().toLowerCase().replace(/\s+/g, "");
+    }
+
+    function isDuplicateRecord(record, records = state.records) {
+      const key = duplicateKey(record);
+      if (!key) return false;
+      return records.filter((item) => duplicateKey(item) === key).length > 1;
+    }
+
+    function recordsWithCandidate(record) {
+      const exists = state.records.some((item) => item.id === record.id);
+      return exists
+        ? state.records.map((item) => item.id === record.id ? record : item)
+        : state.records.concat(record);
     }
 
     function renderLinkButtons(record) {
@@ -1511,9 +1553,11 @@
 
     function renderReview(record) {
       reviewPanel.classList.remove("hidden");
+      const duplicate = isDuplicateRecord(record, recordsWithCandidate(record));
       const facts = record.postUrl ? [
         ["博主名字", editableFact("name", record.name || record.handle || ""), true],
         ["主页链接", record.link ? renderLinkButton("查看主页", record.link) : "待补", true],
+        ...(duplicate ? [["重复提醒", '<span class="chip 重复">重复博主</span>', true]] : []),
         ["帖子链接", record.postUrl ? renderLinkButton("查看帖子", record.postUrl) : "待补", true],
         ["发布时间", record.postDateText || formatChineseDate(record.postPublishedAt) || "待补"],
         ["帖子数据", record.postMetricsText || "待补"],
@@ -1528,6 +1572,7 @@
       ] : [
         ["博主名字", editableFact("name", record.name || record.handle || ""), true],
         ["主页链接", record.link ? renderLinkButton("查看主页", record.link) : "待补", true],
+        ...(duplicate ? [["重复提醒", '<span class="chip 重复">重复博主</span>', true]] : []),
         ["粉丝", editableFact("followers", record.followers || ""), true],
         [record.platform === "Instagram" ? "帖子 / 关注" : "赞藏 / 总赞", editableFact("engagement", record.engagement || ""), true],
         ["时间", [record.dateText, record.timeText].filter(Boolean).join(" ") || "待补"],
@@ -1601,7 +1646,7 @@
             <td>${escapeHtml(item.pax || "待补")}</td>
             <td>${escapeHtml(item.phone || "待补")}</td>
             <td>${escapeHtml(paymentText(item) || "待补")}</td>
-            <td>${escapeHtml(normalizeStatus(item.status))}</td>
+            <td>${escapeHtml([normalizeStatus(item.status), isDuplicateRecord(item) ? "重复" : ""].filter(Boolean).join(" / "))}</td>
           </tr>`).join("")}
         </tbody>
       </table>`;
@@ -1621,9 +1666,9 @@
     }
 
     function exportCsv() {
-      const header = ["信息类型", "状态", "是否高亮", "日期", "星期", "时间", "发帖日期", "平台", "博主账号", "名字", "粉丝数", "数据/赞藏", "点赞", "收藏", "评论", "转发", "帖子数据", "RSVP人数", "电话", "博主状态", "付费金额", "备注", "提交人", "主页链接", "帖子链接", "更新时间"];
+      const header = ["信息类型", "状态", "是否重复", "是否高亮", "日期", "星期", "时间", "发帖日期", "平台", "博主账号", "名字", "粉丝数", "数据/赞藏", "点赞", "收藏", "评论", "转发", "帖子数据", "RSVP人数", "电话", "博主状态", "付费金额", "备注", "提交人", "主页链接", "帖子链接", "更新时间"];
       const rows = state.records.slice().sort(sortRecords).map((item) => [
-        item.type === "post" ? "发帖追踪" : "探店预约", normalizeStatus(item.status), isHighlighted(item) ? "是" : "", item.dateISO, item.weekday, item.timeText, item.postDateText || formatChineseDate(item.postPublishedAt), item.platform, item.handle, item.name, item.followers, item.engagement,
+        item.type === "post" ? "发帖追踪" : "探店预约", normalizeStatus(item.status), isDuplicateRecord(item) ? "是" : "", isHighlighted(item) ? "是" : "", item.dateISO, item.weekday, item.timeText, item.postDateText || formatChineseDate(item.postPublishedAt), item.platform, item.handle, item.name, item.followers, item.engagement,
         item.postLikes, item.postCollects, item.postComments, item.postShares, item.postMetricsText, item.pax, item.phone, item.visitType, item.feeAmount, item.remarks, item.submitter || item.owner, item.link, item.postUrl, item.createdAt
       ]);
       const csv = [header, ...rows].map((row) => row.map(csvCell).join(",")).join("\n");
