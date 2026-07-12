@@ -54,6 +54,10 @@ def sort_minutes(value):
     return hour * 60 + minute
 
 
+def status_sort_rank(record):
+    return 1 if normalize_status(record.get("status")) == "已发布" else 0
+
+
 def display_name(record):
     name = record.get("name") or ""
     handle = str(record.get("handle") or "").lstrip("@")
@@ -102,7 +106,7 @@ try:
 except Exception:
     records = []
 
-records = sorted(records, key=lambda r: (r.get("dateISO") or "9999-99-99", sort_minutes(r.get("timeText"))))
+records = sorted(records, key=lambda r: (status_sort_rank(r), r.get("dateISO") or "9999-99-99", sort_minutes(r.get("timeText"))))
 
 W = 2480
 row_h = 86

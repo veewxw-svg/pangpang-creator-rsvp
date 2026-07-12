@@ -1457,9 +1457,13 @@
     }
 
     function sortRecords(a, b) {
-      const ad = `${a.dateISO || "9999-99-99"} ${pad4(sortMinutes(a.timeText))}`;
-      const bd = `${b.dateISO || "9999-99-99"} ${pad4(sortMinutes(b.timeText))}`;
+      const ad = `${statusSortRank(a)} ${a.dateISO || "9999-99-99"} ${pad4(sortMinutes(a.timeText))}`;
+      const bd = `${statusSortRank(b)} ${b.dateISO || "9999-99-99"} ${pad4(sortMinutes(b.timeText))}`;
       return ad.localeCompare(bd);
+    }
+
+    function statusSortRank(record) {
+      return normalizeStatus(record.status) === "已发布" ? "1" : "0";
     }
 
     function sortMinutes(timeText) {
