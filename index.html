@@ -861,11 +861,11 @@
         : draft;
       const enriched = await enrichRecord(record);
       if (!state.editingId && enriched.type === "post" && enriched.ok !== false) {
-        const matched = findMatchingBooking(enriched);
+        const matched = await findMatchingBooking(enriched);
         if (!matched) {
           state.pendingPostRecord = enriched;
           state.pendingRecord = null;
-          statusLine.textContent = "平台没有给出明确作者，请选择这条帖子要更新到哪位博主";
+          statusLine.textContent = "平台没有给出明确作者，也没有自动匹配到原预约，请选择这条帖子要更新到哪位博主";
           renderPostMatchChooser(enriched);
           return;
         }
@@ -1033,8 +1033,22 @@
       if (!isPaid) feeAmount.value = "";
     }
 
-    function findMatchingBooking(postRecord) {
-      return getPostMatchCandidates().find((item) => sameCreator(item, postRecord));
+    async function findMatchingBooking(postRecord) {
+      const candidates = getPostMatchCandidates();
+      const direct = candidates.find((item) => sameCreator(item, postRecord));
+      if (direct) return direct;
+
+      if (postRecord.platform !== "Instagram" || !normalizeIdentity(postRecord.name)) return null;
+      statusLine.textContent = "帖子没有给出作者账号，正在用已有预约主页自动匹配...";
+
+      for (const item of candidates) {
+        if (item.platform !== "Instagram" || !item.link) continue;
+        const resolved = await resolveProfileUrl(item.link);
+        if (!resolved.ok) continue;
+        const candidate = mergeResolvedProfileForMatch(item, resolved);
+        if (sameCreator(candidate, postRecord)) return candidate;
+      }
+      return null;
     }
 
     function getPostMatchCandidates() {
@@ -1055,6 +1069,21 @@
       const linkA = normalizeProfileLink(a.link);
       const linkB = normalizeProfileLink(b.link);
       return Boolean(linkA && linkB && linkA === linkB);
+    }
+
+    function mergeResolvedProfileForMatch(record, resolved) {
+      const handleName = normalizeIdentity(record.handle);
+      const currentName = normalizeIdentity(record.name);
+      const shouldUseResolvedName = !record.name || currentName === handleName;
+      return {
+        ...record,
+        platform: resolved.platform || record.platform,
+        link: resolved.profileUrl || record.link,
+        handle: resolved.handle || record.handle,
+        name: shouldUseResolvedName ? (resolved.name || record.name) : record.name,
+        followers: record.followers || resolved.followers || "",
+        engagement: record.engagement || resolved.engagement || ""
+      };
     }
 
     function normalizeIdentity(value) {
