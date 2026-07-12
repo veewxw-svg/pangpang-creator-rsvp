@@ -1419,7 +1419,7 @@
         <div class="creator">
           <b>${escapeHtml(title)}</b>
           <div class="meta">${escapeHtml(details || "资料待补")}</div>
-          <div class="meta">${escapeHtml(status === "已发布" ? "探店预约 · 已发帖" : "探店预约")} · 提交人：${escapeHtml(record.submitter || record.owner || "未填写")}</div>
+          <div class="meta">${escapeHtml(status === "已发布" ? "已发帖 · " : "")}提交人：${escapeHtml(record.submitter || record.owner || "未填写")}</div>
           ${linkButtons ? `<div class="link-row">${linkButtons}</div>` : ""}
         </div>
         <div class="actions">
