@@ -1634,7 +1634,7 @@
     function groupByDate(records) {
       const groups = new Map();
       records.forEach((record) => {
-        const key = record.dateISO || "undated";
+        const key = `${statusSortRank(record)}:${record.dateISO || "undated"}`;
         if (!groups.has(key)) groups.set(key, []);
         groups.get(key).push(record);
       });
