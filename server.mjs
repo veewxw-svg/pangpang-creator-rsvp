@@ -128,7 +128,6 @@ function mergeRecords(existingRecords, incomingRecords) {
 
 async function generateReportPng(records, highlightIds = []) {
   await mkdir(outputDir, { recursive: true });
-  await writeRecords(records);
   await runFile(pythonBin, [reportScript], {
     env: {
       ...process.env,
@@ -142,7 +141,6 @@ async function generateReportPng(records, highlightIds = []) {
 
 async function generateReportPdf(records, highlightIds = []) {
   await mkdir(outputDir, { recursive: true });
-  await writeRecords(records);
   await runFile(pythonBin, [reportPdfScript], {
     env: {
       ...process.env,
