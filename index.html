@@ -934,9 +934,11 @@
         state.pendingRecord = null;
         saveRecords({ highlightIds: [record.id] });
         resetForm();
-        statusLine.textContent = `${record.status === "已发布" ? "已更新为已发布" : (editingId ? "已更新" : "已保存")}：${record.dateText || "未填日期"} ${record.timeText || "未填时间"} ${displayCreatorName(record)}`;
+        const savedLabel = record.status === "已发布" ? "已更新为已发布" : (editingId ? "已更新" : "已保存");
+        statusLine.textContent = `${record.dateISO ? savedLabel : `注意：日期未识别，${savedLabel}`}：${record.dateText || "未填日期"} ${record.timeText || "未填时间"} ${displayCreatorName(record)}`;
         reviewPanel.classList.add("hidden");
         render();
+        scrollToRecord(record.id);
       }
     });
 
@@ -1485,7 +1487,7 @@
       const classes = ["record"];
       if (isHighlighted(record)) classes.push(status === "已发布" ? "post-update" : "new-update");
       const linkButtons = renderLinkButtons(record);
-      return `<article class="${classes.join(" ")}">
+      return `<article class="${classes.join(" ")}" data-record-id="${escapeHtml(record.id || "")}">
         <div>
           <div class="time">${escapeHtml(record.timeText || "--")}</div>
           <div class="pax">${escapeHtml(`${record.pax || "?"} pax`)}</div>
@@ -1503,6 +1505,14 @@
           ${status === "取消" ? `<button type="button" data-restore="${record.id}">恢复</button>` : status === "已发布" ? "" : `<button type="button" data-cancel="${record.id}">取消</button>`}
         </div>
       </article>`;
+    }
+
+    function scrollToRecord(id) {
+      requestAnimationFrame(() => {
+        const target = Array.from(document.querySelectorAll("[data-record-id]")).find((item) => item.dataset.recordId === String(id));
+        if (!target) return;
+        target.scrollIntoView({ behavior: "smooth", block: "center" });
+      });
     }
 
     function normalizeStatus(status) {
