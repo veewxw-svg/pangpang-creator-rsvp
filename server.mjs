@@ -294,6 +294,9 @@ async function fetchPage(target) {
   if (/instagram\.com|instagr\.am/i.test(target)) {
     return fetchPageWithCurl(target, { minimal: true });
   }
+  if (/xiaohongshu\.com|xhslink\.com/i.test(target)) {
+    return fetchPageWithCurl(target);
+  }
 
   try {
     const response = await fetch(target, {
@@ -564,6 +567,9 @@ function parseXhsPublishedAt(html, meta = {}) {
   const explicitTextDate = parseXhsExplicitPublishedText(html);
   if (explicitTextDate) return explicitTextDate;
 
+  const noteTime = parseXhsNoteTime(html);
+  if (noteTime) return timestampToIso(noteTime);
+
   const keys = [
     "noteCreateTime",
     "createTime",
@@ -579,6 +585,20 @@ function parseXhsPublishedAt(html, meta = {}) {
   for (const key of keys) {
     const match = findXhsNoteTimestamp(html, key);
     if (match) return timestampToIso(match);
+  }
+  return "";
+}
+
+function parseXhsNoteTime(html) {
+  const patterns = [
+    /"time"\s*:\s*([0-9]{10,13})\s*,\s*"lastUpdateTime"/i,
+    /"tagList"\s*:\s*\[[\s\S]{0,6000}?\]\s*,\s*"time"\s*:\s*([0-9]{10,13})\s*,\s*"shareInfo"/i,
+    /"note"\s*:\s*\{[\s\S]{0,50000}?"time"\s*:\s*([0-9]{10,13})\s*,\s*"shareInfo"/i,
+    /"noteId"\s*:\s*"[^"]+"\s*,\s*"desc"\s*:[\s\S]{0,50000}?"time"\s*:\s*([0-9]{10,13})/i
+  ];
+  for (const pattern of patterns) {
+    const match = html.match(pattern);
+    if (match?.[1]) return match[1];
   }
   return "";
 }
