@@ -1448,6 +1448,11 @@
       if (half) return toDisplayTime(Number(half[1]), 30, "");
       const cn = lower.match(/(\d{1,2})\s*点\s*(\d{1,2})?/);
       if (cn) return toDisplayTime(Number(cn[1]), Number(cn[2] || 0), "");
+      const compactAmpm = lower.match(/\b(\d{3,4})\s*(am|pm)\b/);
+      if (compactAmpm) {
+        const digits = compactAmpm[1];
+        return toDisplayTime(Number(digits.slice(0, -2)), Number(digits.slice(-2)), compactAmpm[2]);
+      }
       const ampm = lower.match(/\b(1[0-2]|0?[1-9])(?:[:.](\d{2}))?\s*(am|pm)\b/);
       if (ampm) return toDisplayTime(Number(ampm[1]), Number(ampm[2] || 0), ampm[3]);
       const digital = lower.match(/\b([01]?\d|2[0-3]):([0-5]\d)\b/);
