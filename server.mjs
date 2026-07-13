@@ -431,7 +431,8 @@ async function resolveProfile(target) {
 
 async function fetchPage(target) {
   if (/instagram\.com|instagr\.am/i.test(target)) {
-    return fetchPageWithCurl(target, { minimal: true });
+    const isPost = /\/(?:p|reel|reels)\//i.test(target);
+    return fetchPageWithCurl(target, isPost ? { userAgent: "facebookexternalhit/1.1" } : { minimal: true });
   }
   if (/xiaohongshu\.com|xhslink\.com/i.test(target)) {
     return fetchPageWithCurl(target);
@@ -465,7 +466,7 @@ async function fetchPageWithCurl(target, options = {}) {
   if (!options.minimal) {
     args.push(
       "-A",
-      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36",
+      options.userAgent || "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36",
       "-H",
       "Accept-Language: zh-CN,zh;q=0.9,en;q=0.8"
     );
@@ -485,6 +486,7 @@ function collectMeta(html) {
     description: decodeEntities(get(/<meta[^>]+name=["']description["'][^>]+content=["']([^"']*)["'][^>]*>/i) || get(/<meta[^>]+content=["']([^"']*)["'][^>]+name=["']description["'][^>]*>/i)),
     ogTitle: decodeEntities(get(/<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']*)["'][^>]*>/i) || get(/<meta[^>]+content=["']([^"']*)["'][^>]+property=["']og:title["'][^>]*>/i)),
     ogDescription: decodeEntities(get(/<meta[^>]+property=["']og:description["'][^>]+content=["']([^"']*)["'][^>]*>/i) || get(/<meta[^>]+content=["']([^"']*)["'][^>]+property=["']og:description["'][^>]*>/i)),
+    ogUrl: decodeEntities(get(/<meta[^>]+property=["']og:url["'][^>]+content=["']([^"']*)["'][^>]*>/i) || get(/<meta[^>]+content=["']([^"']*)["'][^>]+property=["']og:url["'][^>]*>/i)),
     articlePublishedTime: decodeEntities(get(/<meta[^>]+property=["']article:published_time["'][^>]+content=["']([^"']*)["'][^>]*>/i) || get(/<meta[^>]+content=["']([^"']*)["'][^>]+property=["']article:published_time["'][^>]*>/i))
   };
 }
@@ -528,15 +530,17 @@ function parseInstagramMeta(meta, html, finalUrl) {
   const isPost = /\/(?:p|reel|reels)\//i.test(finalUrl);
   const titleMatch = title.match(/^(.+?)\s+\(@([^)]+)\)/);
   const descMatch = description.match(/-\s*(.+?)\s+\(@([^)]+)\)\s+on Instagram/i);
+  const ownerDateMatch = description.match(/-\s*([A-Za-z0-9_.]+)\s+on\s+([A-Za-z]+)\s+(\d{1,2}),\s+(20\d{2})/i);
   const postTitleMatch = title.match(/^(.+?)\s+on Instagram\s*:/i) || description.match(/-\s*(.+?)\s+on Instagram\s*:/i);
   const stats = readInstagramStats([description, fallback, title, stripTags(html).slice(0, 3000)].filter(Boolean));
   const bioMatch = description.match(/on Instagram:\s*"([^"]*)"/i);
-  const rawUrlHandle = finalUrl.match(/instagram\.com\/([^/?#]+)/i)?.[1] || "";
+  const rawUrlHandle = (meta.ogUrl || finalUrl).match(/instagram\.com\/([^/?#]+)/i)?.[1] || "";
   const urlHandle = isInstagramReservedSegment(rawUrlHandle) ? "" : rawUrlHandle;
-  const handle = titleMatch?.[2] || descMatch?.[2] || urlHandle;
+  const handle = titleMatch?.[2] || descMatch?.[2] || ownerDateMatch?.[1] || urlHandle;
   const following = stats.following || "";
   const postCount = stats.postCount || "";
-  const publishedAt = parsePublishedAt(html, meta);
+  const instagramDateText = [description, fallback, title, meta.ogTitle, meta.ogDescription, meta.title].filter(Boolean).join(" ");
+  const publishedAt = parseInstagramPublishedAt(instagramDateText) || parsePublishedAt(html, meta);
   const likeMatch = description.match(/([\d,.KMkm]+)\s+likes?/i);
   const commentMatch = description.match(/([\d,.KMkm]+)\s+comments?/i);
   const profileUrl = handle ? `https://www.instagram.com/${handle.replace(/^@/, "")}/` : finalUrl;
@@ -561,6 +565,24 @@ function parseInstagramMeta(meta, html, finalUrl) {
     postTitle: title.replace(/\s*•\s*Instagram.*/i, "").trim(),
     publishedAt
   };
+}
+
+function parseInstagramPublishedAt(text) {
+  const source = String(text || "");
+  const match = source.match(/(?:\bon\s+|[,，]\s*)?([A-Za-z]+)\s+(\d{1,2}),\s+(20\d{2})\b/i);
+  const months = {
+    january: 1, jan: 1, february: 2, feb: 2, march: 3, mar: 3, april: 4, apr: 4,
+    may: 5, june: 6, jun: 6, july: 7, jul: 7, august: 8, aug: 8,
+    september: 9, sep: 9, sept: 9, october: 10, oct: 10,
+    november: 11, nov: 11, december: 12, dec: 12
+  };
+  if (match) {
+    const month = months[match[1].toLowerCase()];
+    return datePartsToIso(Number(match[3]), month, Number(match[2]));
+  }
+  const zhMatch = source.match(/(20\d{2})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日/);
+  if (zhMatch) return datePartsToIso(Number(zhMatch[1]), Number(zhMatch[2]), Number(zhMatch[3]));
+  return "";
 }
 
 async function fetchInstagramProfileJson(target, finalUrl) {
