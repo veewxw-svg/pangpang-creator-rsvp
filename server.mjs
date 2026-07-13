@@ -50,7 +50,7 @@ createServer(async (req, res) => {
     }
 
     if (url.pathname === "/api/records" && req.method === "GET") {
-      sendJson(res, { ok: true, records: await readRecords() });
+      sendJson(res, { ok: true, storage: useDatabase() ? "database" : "file", records: await readRecords() });
       return;
     }
 

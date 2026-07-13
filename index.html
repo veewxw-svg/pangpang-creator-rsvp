@@ -1253,21 +1253,28 @@
         const response = await fetch(apiEndpoint("/api/records"), { headers: { "Accept": "application/json" } });
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const data = await response.json();
+        const isDatabaseStorage = data.storage === "database";
         if (!Array.isArray(data.records) || !data.records.length) {
-          if (state.records.length) {
+          if (state.records.length && !isDatabaseStorage) {
             await saveRecords();
             statusLine.textContent = "已把本机记录同步到后台";
+          } else if (isDatabaseStorage) {
+            state.records = [];
+            localStorage.setItem(KEY, JSON.stringify(state.records));
+            render();
+            statusLine.textContent = "已连接数据库记录";
           }
           return;
         }
         const serverRecords = data.records.filter((record) => !isInvalidDraftRecord(record));
-        state.records = mergeRecordLists(state.records, serverRecords).filter((record) => !isInvalidDraftRecord(record));
+        state.records = (isDatabaseStorage ? serverRecords : mergeRecordLists(state.records, serverRecords))
+          .filter((record) => !isInvalidDraftRecord(record));
         localStorage.setItem(KEY, JSON.stringify(state.records));
-        if (state.records.length !== serverRecords.length) {
+        if (!isDatabaseStorage && state.records.length !== serverRecords.length) {
           await saveRecords({ silent: true });
         }
         render();
-        statusLine.textContent = "已连接后台记录";
+        statusLine.textContent = isDatabaseStorage ? "已连接数据库记录" : "已连接后台记录";
         refreshPostMetricsOnOpen();
       } catch {
         statusLine.textContent = "现在使用本机浏览器记录；如需多人共用，请保持后台服务开启";
