@@ -1260,9 +1260,10 @@
           }
           return;
         }
-        state.records = data.records.filter((record) => !isInvalidDraftRecord(record));
+        const serverRecords = data.records.filter((record) => !isInvalidDraftRecord(record));
+        state.records = mergeRecordLists(state.records, serverRecords).filter((record) => !isInvalidDraftRecord(record));
         localStorage.setItem(KEY, JSON.stringify(state.records));
-        if (state.records.length !== data.records.length) {
+        if (state.records.length !== serverRecords.length) {
           await saveRecords({ silent: true });
         }
         render();
@@ -1906,6 +1907,44 @@
       } catch {
         return [];
       }
+    }
+
+    function mergeRecordLists(localRecords, serverRecords) {
+      const byId = new Map();
+      [...(serverRecords || []), ...(localRecords || [])].forEach((record) => {
+        if (!record || !record.id) return;
+        const id = String(record.id);
+        const existing = byId.get(id);
+        byId.set(id, existing ? pickBetterRecord(existing, record) : record);
+      });
+      return Array.from(byId.values());
+    }
+
+    function pickBetterRecord(a, b) {
+      const aUpdated = Number(a.highlightUntil || 0) || Date.parse(a.createdAt || "") || 0;
+      const bUpdated = Number(b.highlightUntil || 0) || Date.parse(b.createdAt || "") || 0;
+      const aScore = recordCompletenessScore(a);
+      const bScore = recordCompletenessScore(b);
+      if (bUpdated > aUpdated && bScore >= aScore - 1) return b;
+      if (aUpdated > bUpdated && aScore >= bScore - 1) return a;
+      return bScore >= aScore ? b : a;
+    }
+
+    function recordCompletenessScore(record) {
+      return [
+        record.name,
+        record.handle,
+        record.link,
+        record.followers,
+        record.engagement,
+        record.dateISO,
+        record.timeText,
+        record.pax,
+        record.phone,
+        record.visitType,
+        record.postUrl,
+        record.postMetricsText
+      ].filter(Boolean).length;
     }
 
     function isInvalidDraftRecord(record) {

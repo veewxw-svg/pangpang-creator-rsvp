@@ -11,6 +11,7 @@ const port = Number(process.env.PORT || 8787);
 const runFile = promisify(execFile);
 const dataDir = process.env.DATA_DIR || join(root, "data");
 const recordsPath = join(dataDir, "records.json");
+const backupDir = join(dataDir, "backups");
 const outputDir = process.env.OUTPUT_DIR || join(root, "output");
 const reportPath = join(outputDir, "pangpang_creator_report.png");
 const reportScript = join(root, "generate_live_report_png.py");
@@ -112,7 +113,21 @@ async function readRecords() {
 
 async function writeRecords(records) {
   await mkdir(dataDir, { recursive: true });
+  await backupRecords();
   await writeFile(recordsPath, JSON.stringify(records, null, 2), "utf8");
+}
+
+async function backupRecords() {
+  try {
+    const existing = await readFile(recordsPath, "utf8");
+    const current = JSON.parse(existing);
+    if (!Array.isArray(current) || !current.length) return;
+    await mkdir(backupDir, { recursive: true });
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    await writeFile(join(backupDir, `records-${stamp}.json`), existing, "utf8");
+  } catch {
+    // Backups are best-effort; saving should still work if no previous file exists.
+  }
 }
 
 function mergeRecords(existingRecords, incomingRecords) {
