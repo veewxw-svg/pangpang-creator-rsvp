@@ -432,7 +432,8 @@ async function resolveProfile(target) {
 async function fetchPage(target) {
   if (/instagram\.com|instagr\.am/i.test(target)) {
     const isPost = /\/(?:p|reel|reels)\//i.test(target);
-    return fetchPageWithCurl(target, isPost ? { userAgent: "facebookexternalhit/1.1" } : { minimal: true });
+    if (isPost) return fetchInstagramPostPage(target);
+    return fetchPageWithCurl(target, { minimal: true });
   }
   if (/xiaohongshu\.com|xhslink\.com/i.test(target)) {
     return fetchPageWithCurl(target);
@@ -456,12 +457,32 @@ async function fetchPage(target) {
   }
 }
 
+async function fetchInstagramPostPage(target) {
+  const userAgents = [
+    "facebookexternalhit/1.1",
+    "Twitterbot/1.0",
+    "Slackbot-LinkExpanding 1.0 (+https://api.slack.com/robots)",
+    "LinkedInBot/1.0",
+    "WhatsApp/2.23.20.0"
+  ];
+  let fallback = null;
+  for (const userAgent of userAgents) {
+    const page = await fetchPageWithCurl(target, { userAgent, maxTime: 10 });
+    fallback ||= page;
+    const meta = collectMeta(page.html || "");
+    if (page.status >= 200 && page.status < 400 && (meta.description || meta.ogDescription || meta.ogTitle)) {
+      return page;
+    }
+  }
+  return fallback || fetchPageWithCurl(target, { userAgent: userAgents[0], maxTime: 10 });
+}
+
 async function fetchPageWithCurl(target, options = {}) {
   const args = [
     "-L",
     "-sS",
     "--max-time",
-    "15",
+    String(options.maxTime || 15),
   ];
   if (!options.minimal) {
     args.push(
