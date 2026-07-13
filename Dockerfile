@@ -11,6 +11,7 @@ RUN apt-get update \
   && rm -rf /var/lib/apt/lists/*
 
 COPY package.json requirements.txt ./
+RUN npm install --omit=dev
 RUN pip3 install --break-system-packages --no-cache-dir -r requirements.txt
 
 COPY . .
