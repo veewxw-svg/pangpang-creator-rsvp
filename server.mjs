@@ -19,6 +19,10 @@ const reportPdfPath = join(outputDir, "pangpang_creator_report.pdf");
 const reportPdfScript = join(root, "generate_live_report_pdf.py");
 const bundledPython = "/Users/Vee/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3";
 const pythonBin = process.env.PYTHON_BIN || (existsSync(bundledPython) ? bundledPython : "python3");
+const databaseUrl = process.env.DATABASE_URL || process.env.POSTGRES_URL || "";
+const recordsTable = process.env.RECORDS_TABLE || "creator_rsvp_records";
+let dbPoolPromise;
+let dbReadyPromise;
 
 const mime = {
   ".html": "text/html; charset=utf-8",
@@ -47,6 +51,12 @@ createServer(async (req, res) => {
 
     if (url.pathname === "/api/records" && req.method === "GET") {
       sendJson(res, { ok: true, records: await readRecords() });
+      return;
+    }
+
+    if (url.pathname === "/api/health") {
+      const records = await readRecords();
+      sendJson(res, { ok: true, storage: useDatabase() ? "database" : "file", count: records.length });
       return;
     }
 
@@ -102,6 +112,11 @@ createServer(async (req, res) => {
 });
 
 async function readRecords() {
+  if (useDatabase()) return readDbRecords();
+  return readFileRecords();
+}
+
+async function readFileRecords() {
   try {
     const data = await readFile(recordsPath, "utf8");
     const records = JSON.parse(data);
@@ -112,9 +127,103 @@ async function readRecords() {
 }
 
 async function writeRecords(records) {
+  if (useDatabase()) {
+    await writeDbRecords(records);
+    await backupRecordsSnapshot(records, "database");
+    return;
+  }
   await mkdir(dataDir, { recursive: true });
   await backupRecords();
   await writeFile(recordsPath, JSON.stringify(records, null, 2), "utf8");
+}
+
+function useDatabase() {
+  return Boolean(databaseUrl);
+}
+
+async function getDbPool() {
+  if (!dbPoolPromise) {
+    dbPoolPromise = import("pg").then(({ Pool }) => new Pool({
+      connectionString: databaseUrl,
+      ssl: shouldUseDatabaseSsl(databaseUrl) ? { rejectUnauthorized: false } : false
+    }));
+  }
+  return dbPoolPromise;
+}
+
+function shouldUseDatabaseSsl(url) {
+  return !/localhost|127\.0\.0\.1|::1/i.test(String(url || ""));
+}
+
+function quoteIdentifier(value) {
+  return String(value || "").replace(/[^a-zA-Z0-9_]/g, "") || "creator_rsvp_records";
+}
+
+async function ensureDbReady() {
+  if (!dbReadyPromise) {
+    dbReadyPromise = (async () => {
+      const pool = await getDbPool();
+      const table = quoteIdentifier(recordsTable);
+      await pool.query(`
+        create table if not exists ${table} (
+          id text primary key,
+          data jsonb not null,
+          updated_at timestamptz not null default now()
+        )
+      `);
+      await migrateFileRecordsToDatabase();
+    })();
+  }
+  return dbReadyPromise;
+}
+
+async function migrateFileRecordsToDatabase() {
+  const fileRecords = await readFileRecords();
+  if (!fileRecords.length) return;
+  const dbRecords = await readDbRecordsRaw();
+  if (dbRecords.length) return;
+  await writeDbRecordsRaw(fileRecords);
+}
+
+async function readDbRecords() {
+  await ensureDbReady();
+  return readDbRecordsRaw();
+}
+
+async function readDbRecordsRaw() {
+  const pool = await getDbPool();
+  const table = quoteIdentifier(recordsTable);
+  const result = await pool.query(`select data from ${table} order by updated_at asc`);
+  return result.rows.map((row) => row.data).filter(Boolean);
+}
+
+async function writeDbRecords(records) {
+  await ensureDbReady();
+  return writeDbRecordsRaw(records);
+}
+
+async function writeDbRecordsRaw(records) {
+  const cleanRecords = Array.isArray(records) ? records.filter((record) => record && record.id) : [];
+  const pool = await getDbPool();
+  const table = quoteIdentifier(recordsTable);
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    for (const record of cleanRecords) {
+      await client.query(
+        `insert into ${table} (id, data, updated_at)
+         values ($1, $2::jsonb, now())
+         on conflict (id) do update set data = excluded.data, updated_at = now()`,
+        [String(record.id), JSON.stringify(record)]
+      );
+    }
+    await client.query("commit");
+  } catch (error) {
+    await client.query("rollback").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 async function backupRecords() {
@@ -127,6 +236,17 @@ async function backupRecords() {
     await writeFile(join(backupDir, `records-${stamp}.json`), existing, "utf8");
   } catch {
     // Backups are best-effort; saving should still work if no previous file exists.
+  }
+}
+
+async function backupRecordsSnapshot(records, source = "records") {
+  try {
+    if (!Array.isArray(records) || !records.length) return;
+    await mkdir(backupDir, { recursive: true });
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    await writeFile(join(backupDir, `${source}-${stamp}.json`), JSON.stringify(records, null, 2), "utf8");
+  } catch {
+    // Backups are best-effort; the database remains the source of truth.
   }
 }
 
@@ -143,10 +263,11 @@ function mergeRecords(existingRecords, incomingRecords) {
 
 async function generateReportPng(records, highlightIds = []) {
   await mkdir(outputDir, { recursive: true });
+  const reportRecordsPath = await writeReportRecordsSnapshot(records, "report-records-png.json");
   await runFile(pythonBin, [reportScript], {
     env: {
       ...process.env,
-      PANGPANG_RECORDS_JSON: recordsPath,
+      PANGPANG_RECORDS_JSON: reportRecordsPath,
       PANGPANG_REPORT_OUT: reportPath,
       PANGPANG_HIGHLIGHT_IDS: highlightIds.join(",")
     },
@@ -156,15 +277,22 @@ async function generateReportPng(records, highlightIds = []) {
 
 async function generateReportPdf(records, highlightIds = []) {
   await mkdir(outputDir, { recursive: true });
+  const reportRecordsPath = await writeReportRecordsSnapshot(records, "report-records-pdf.json");
   await runFile(pythonBin, [reportPdfScript], {
     env: {
       ...process.env,
-      PANGPANG_RECORDS_JSON: recordsPath,
+      PANGPANG_RECORDS_JSON: reportRecordsPath,
       PANGPANG_REPORT_PDF_OUT: reportPdfPath,
       PANGPANG_HIGHLIGHT_IDS: highlightIds.join(",")
     },
     maxBuffer: 1024 * 1024
   });
+}
+
+async function writeReportRecordsSnapshot(records, filename) {
+  const reportRecordsPath = join(outputDir, filename);
+  await writeFile(reportRecordsPath, JSON.stringify(Array.isArray(records) ? records : [], null, 2), "utf8");
+  return reportRecordsPath;
 }
 
 async function maybeSendNotification(records, highlightIds = []) {
