@@ -714,6 +714,9 @@ function parseXhsPublishedAt(html, meta = {}) {
   const noteTime = parseXhsNoteTime(html);
   if (noteTime) return timestampToIso(noteTime);
 
+  const visibleDate = parseXhsVisibleDate(html);
+  if (visibleDate) return visibleDate;
+
   const keys = [
     "noteCreateTime",
     "createTime",
@@ -737,14 +740,24 @@ function parseXhsNoteTime(html) {
   const patterns = [
     /"time"\s*:\s*([0-9]{10,13})\s*,\s*"lastUpdateTime"/i,
     /"tagList"\s*:\s*\[[\s\S]{0,6000}?\]\s*,\s*"time"\s*:\s*([0-9]{10,13})\s*,\s*"shareInfo"/i,
-    /"note"\s*:\s*\{[\s\S]{0,50000}?"time"\s*:\s*([0-9]{10,13})\s*,\s*"shareInfo"/i,
-    /"noteId"\s*:\s*"[^"]+"\s*,\s*"desc"\s*:[\s\S]{0,50000}?"time"\s*:\s*([0-9]{10,13})/i
+    /"note"\s*:\s*\{[\s\S]{0,250000}?"time"\s*:\s*([0-9]{10,13})\s*,\s*"shareInfo"/i,
+    /"noteId"\s*:\s*"[^"]+"\s*,\s*"desc"\s*:[\s\S]{0,250000}?"time"\s*:\s*([0-9]{10,13})/i
   ];
   for (const pattern of patterns) {
     const match = html.match(pattern);
     if (match?.[1]) return match[1];
   }
   return "";
+}
+
+function parseXhsVisibleDate(html) {
+  const source = decodeEntities(stripTags(html)).replace(/\s+/g, " ");
+  const match = source.match(/\b(\d{1,2})-(\d{1,2})\s*(?:新加坡|中国|上海|北京|广东|浙江|江苏|IP属地)?\b/);
+  if (!match) return "";
+  const serverTime = Number(html.match(/"serverTime"\s*:\s*([0-9]{10,13})/)?.[1] || "");
+  const base = Number.isFinite(serverTime) && serverTime > 0 ? new Date(serverTime) : new Date();
+  const year = base.getFullYear();
+  return datePartsToIso(year, Number(match[1]), Number(match[2]));
 }
 
 function parseXhsExplicitPublishedText(html) {
