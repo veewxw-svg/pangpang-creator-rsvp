@@ -31,3 +31,7 @@ services:
         sync: false
       - key: NOTIFY_TO
         sync: false
+      - key: APIFY_TOKEN
+        sync: false
+      - key: APIFY_IG_ACTOR
+        value: apify/instagram-scraper

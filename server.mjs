@@ -25,6 +25,8 @@ const stateTable = process.env.STATE_TABLE || "creator_rsvp_state";
 const statePath = join(dataDir, "state.json");
 const reportTimeZone = process.env.REPORT_TIME_ZONE || "Asia/Singapore";
 const dailyReportTime = process.env.DAILY_REPORT_TIME || "21:30";
+const apifyToken = process.env.APIFY_TOKEN || "";
+const apifyInstagramActor = process.env.APIFY_IG_ACTOR || "apify/instagram-scraper";
 let dbPoolPromise;
 let dbReadyPromise;
 
@@ -570,6 +572,10 @@ async function resolveProfile(target) {
   }
 
   try {
+    if (/instagram\.com|instagr\.am/i.test(target) && apifyToken) {
+      const apify = await fetchApifyInstagram(target).catch((error) => ({ ok: false, message: error.message || String(error) }));
+      if (apify.ok) return apify;
+    }
     const page = await fetchPage(target);
     const finalUrl = page.finalUrl || target;
     const instagramJson = await fetchInstagramProfileJson(target, finalUrl);
@@ -693,6 +699,101 @@ async function fetchPageWithCurl(target, options = {}) {
   const status = Number(stdout.match(/\n__HTTP_CODE__(\d+)/)?.[1] || 0);
   const html = stdout.replace(/\n__FINAL_URL__.*\n__HTTP_CODE__\d+\s*$/s, "");
   return { status, finalUrl, html };
+}
+
+async function fetchApifyInstagram(target) {
+  const actorId = apifyInstagramActor.replace("/", "~");
+  const endpoint = `https://api.apify.com/v2/acts/${encodeURIComponent(actorId)}/run-sync-get-dataset-items?token=${encodeURIComponent(apifyToken)}`;
+  const input = {
+    directUrls: [target],
+    resultsType: /\/(?:p|reel|reels)\//i.test(target) ? "posts" : "details",
+    resultsLimit: 1
+  };
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input)
+  });
+  const items = await response.json().catch(() => []);
+  if (!response.ok) {
+    const message = Array.isArray(items) ? "" : (items?.error?.message || items?.message || "");
+    throw new Error(`Apify HTTP ${response.status}${message ? `: ${message}` : ""}`);
+  }
+  const item = Array.isArray(items) ? items[0] : items?.[0];
+  if (!item || typeof item !== "object") return { ok: false, message: "Apify 没有返回 IG 数据" };
+  return parseApifyInstagramItem(item, target);
+}
+
+function parseApifyInstagramItem(item, target) {
+  const isPost = /\/(?:p|reel|reels)\//i.test(target) || item.type || item.shortCode || item.caption;
+  const username = cleanInstagramUsername(
+    item.ownerUsername || item.owner?.username || item.username || item.inputUrl?.match(/instagram\.com\/([^/?#]+)/i)?.[1] || ""
+  );
+  const fullName = item.ownerFullName || item.owner?.fullName || item.fullName || item.name || "";
+  const profileUrl = username ? `https://www.instagram.com/${username}/` : (item.profileUrl || "");
+  const postUrl = isPost ? (item.url || item.postUrl || target) : "";
+  const followers = firstCount(item.followersCount, item.followers, item.followedByCount);
+  const following = firstCount(item.followsCount, item.followingCount, item.following);
+  const postCount = firstCount(item.postsCount, item.posts, item.mediaCount);
+  const likes = firstCount(item.likesCount, item.likeCount, item.likes);
+  const comments = firstCount(item.commentsCount, item.commentCount, item.comments);
+  const plays = firstCount(item.videoPlayCount, item.videoViewCount, item.viewsCount, item.playCount);
+  const publishedAt = normalizeApifyDate(item.timestamp || item.takenAtTimestamp || item.createdAt || item.date);
+
+  return {
+    ok: true,
+    finalUrl: item.url || target,
+    profileUrl: profileUrl || target,
+    postUrl,
+    platform: "Instagram",
+    handle: username ? `@${username}` : "",
+    name: fullName || username || "",
+    followers,
+    engagement: (postCount || following) ? `${postCount || "0"} posts · ${following || "0"} following` : "",
+    following,
+    postCount,
+    postLikes: likes,
+    postCollects: "",
+    postComments: comments,
+    postShares: "",
+    postMetricsText: [
+      likes ? `点赞 ${likes}` : "",
+      comments ? `评论 ${comments}` : "",
+      plays ? `播放 ${plays}` : ""
+    ].filter(Boolean).join(" · "),
+    redId: "",
+    description: item.biography || item.caption || item.description || "",
+    postTitle: item.caption || item.title || "",
+    publishedAt,
+    sourceTitle: "Apify Instagram Scraper",
+    source: "apify"
+  };
+}
+
+function cleanInstagramUsername(value) {
+  const raw = String(value || "").trim().replace(/^@/, "");
+  if (!raw || isInstagramReservedSegment(raw)) return "";
+  return raw;
+}
+
+function firstCount(...values) {
+  for (const value of values) {
+    if (value === 0) return "0";
+    if (value == null || value === "") continue;
+    return normalizeNumber(value, "");
+  }
+  return "";
+}
+
+function normalizeApifyDate(value) {
+  if (!value) return "";
+  if (typeof value === "number") {
+    const millis = value > 10_000_000_000 ? value : value * 1000;
+    const date = new Date(millis);
+    return Number.isNaN(date.getTime()) ? "" : date.toISOString();
+  }
+  const date = new Date(String(value));
+  return Number.isNaN(date.getTime()) ? "" : date.toISOString();
 }
 
 function collectMeta(html) {

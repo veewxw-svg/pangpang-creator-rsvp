@@ -56,6 +56,17 @@ NOTIFY_TO=老板邮箱,店长邮箱,营销邮箱
 PUBLIC_URL=正式网站网址
 ```
 
+## Instagram 数据追踪
+
+如果要更稳定地追踪公开 Instagram 帖子/Reel 数据，可以设置：
+
+```text
+APIFY_TOKEN=你的 Apify API Token
+APIFY_IG_ACTOR=apify/instagram-scraper
+```
+
+设置后，系统会优先用 Apify 抓 Instagram 作者、发布时间、点赞、评论、播放等数据；没有设置时继续使用公开网页兜底。
+
 ## 主要接口
 
 ```text
