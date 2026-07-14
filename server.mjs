@@ -427,6 +427,7 @@ async function sendDailyReportEmail(records, highlightIds = [], day = reportDate
   }
 
   const hasChanges = highlightIds.length > 0;
+  const summaryHtml = buildDailySummaryHtml(records, highlightIds);
   let pdf = null;
   if (hasChanges) {
     await generateReportPdf(records, highlightIds);
@@ -446,6 +447,7 @@ async function sendDailyReportEmail(records, highlightIds = [], day = reportDate
       hasChanges
         ? `<p>${day} 共有 ${highlightIds.length} 条变动，最新全局表 PDF 已附在邮件里。浅蓝=当天新增预约，浅绿=当天发帖更新，浅红=取消。</p>`
         : `<p>${day} 今天没有改变。</p>`,
+      hasChanges ? summaryHtml : "",
       hasChanges ? "<p>主页和帖子按钮放在 PDF 里，可直接点击打开。</p>" : "",
       "</div>"
     ].join("")
@@ -468,6 +470,61 @@ async function sendDailyReportEmail(records, highlightIds = [], day = reportDate
   const result = await response.json().catch(() => ({}));
   if (!response.ok) return { sent: false, status: response.status, result };
   return { sent: true, result };
+}
+
+function buildDailySummaryHtml(records, highlightIds = []) {
+  const changed = new Set((highlightIds || []).map(String));
+  const groups = {
+    added: [],
+    published: [],
+    cancelled: []
+  };
+  for (const record of Array.isArray(records) ? records : []) {
+    if (!changed.has(String(record?.id || ""))) continue;
+    const status = normalizeStatusText(record.status);
+    if (status === "取消") groups.cancelled.push(record);
+    else if (status === "已发布") groups.published.push(record);
+    else groups.added.push(record);
+  }
+  const section = (title, items) => {
+    const rows = items.map((record) => `<li>${escapeHtml(recordBrief(record))}</li>`).join("");
+    return `<div style="margin:14px 0 0"><b>${title}（${items.length}）</b>${items.length ? `<ul style="margin:8px 0 0 18px;padding:0;line-height:1.55">${rows}</ul>` : "<p style=\"margin:6px 0 0;color:#86868b\">无</p>"}</div>`;
+  };
+  return [
+    "<div style=\"margin:16px 0;padding:14px 16px;background:#f5f5f7;border-radius:14px\">",
+    "<h3 style=\"margin:0 0 8px;font-size:18px\">今日简报</h3>",
+    section("新增/更新", groups.added),
+    section("已发布", groups.published),
+    section("取消", groups.cancelled),
+    "</div>"
+  ].join("");
+}
+
+function recordBrief(record) {
+  const name = record.name || record.handle || "未识别账号";
+  const bookingTime = [record.dateText, record.timeText].filter(Boolean).join(" ");
+  const people = record.pax ? `${record.pax} pax` : "";
+  const phone = record.phone ? `电话 ${record.phone}` : "";
+  const platform = record.platform || "";
+  const post = record.postMetricsText ? `帖子数据 ${record.postMetricsText}` : "";
+  const postedAt = record.postDateText || "";
+  return [name, platform, bookingTime, people, phone, postedAt ? `发帖 ${postedAt}` : "", post].filter(Boolean).join(" · ");
+}
+
+function normalizeStatusText(status) {
+  const text = String(status || "").trim();
+  if (text === "已发布" || text === "发布" || text === "发帖") return "已发布";
+  if (text === "取消" || text === "已取消") return "取消";
+  return "新增";
+}
+
+function escapeHtml(value) {
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
 function startDailyReportScheduler() {
