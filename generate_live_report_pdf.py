@@ -15,6 +15,7 @@ from reportlab.pdfgen import canvas
 RECORDS = Path(os.environ.get("PANGPANG_RECORDS_JSON", "data/records.json"))
 OUT = Path(os.environ.get("PANGPANG_REPORT_PDF_OUT", "output/pangpang_creator_report.pdf"))
 HIGHLIGHT_IDS = {item.strip() for item in os.environ.get("PANGPANG_HIGHLIGHT_IDS", "").split(",") if item.strip()}
+REPORT_DATE = os.environ.get("PANGPANG_REPORT_DATE", "")
 
 FONT_REG_CANDIDATES = [
     os.environ.get("PANGPANG_FONT_REG", ""),
@@ -272,7 +273,10 @@ def new_page():
 
 
 def draw_header(draw):
-    draw.text((M, 36), "PangPang 博主探店预约全局表", fill=BLACK, font=TITLE_FONT)
+    title = "PangPang 博主探店预约全局表"
+    if REPORT_DATE:
+        title = f"{title} {REPORT_DATE}"
+    draw.text((M, 36), title, fill=BLACK, font=TITLE_FONT)
     y = 106
     metric_h = 90
     draw.rounded_rectangle((M, y, PAGE_W - M, y + metric_h), radius=22, fill=PANEL)

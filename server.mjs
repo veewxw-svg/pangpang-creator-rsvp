@@ -334,6 +334,16 @@ function reportDateKey(date = new Date()) {
   return `${get("year")}-${get("month")}-${get("day")}`;
 }
 
+function readableReportDate(date = new Date()) {
+  return new Intl.DateTimeFormat("zh-CN", {
+    timeZone: reportTimeZone,
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+    weekday: "long"
+  }).format(date);
+}
+
 function reportTimeParts(date = new Date()) {
   const parts = new Intl.DateTimeFormat("en-GB", {
     timeZone: reportTimeZone,
@@ -380,7 +390,7 @@ async function generateReportPng(records, highlightIds = []) {
   });
 }
 
-async function generateReportPdf(records, highlightIds = []) {
+async function generateReportPdf(records, highlightIds = [], reportDate = readableReportDate()) {
   await mkdir(outputDir, { recursive: true });
   const reportRecordsPath = await writeReportRecordsSnapshot(records, "report-records-pdf.json");
   await runFile(pythonBin, [reportPdfScript], {
@@ -388,7 +398,8 @@ async function generateReportPdf(records, highlightIds = []) {
       ...process.env,
       PANGPANG_RECORDS_JSON: reportRecordsPath,
       PANGPANG_REPORT_PDF_OUT: reportPdfPath,
-      PANGPANG_HIGHLIGHT_IDS: highlightIds.join(",")
+      PANGPANG_HIGHLIGHT_IDS: highlightIds.join(","),
+      PANGPANG_REPORT_DATE: reportDate
     },
     maxBuffer: 1024 * 1024
   });
@@ -430,7 +441,7 @@ async function sendDailyReportEmail(records, highlightIds = [], day = reportDate
   const summaryHtml = buildDailySummaryHtml(records, highlightIds);
   let pdf = null;
   if (hasChanges) {
-    await generateReportPdf(records, highlightIds);
+    await generateReportPdf(records, highlightIds, readableReportDate());
     pdf = await readFile(reportPdfPath);
   }
   const subject = hasChanges
