@@ -335,13 +335,14 @@ function reportDateKey(date = new Date()) {
 }
 
 function readableReportDate(date = new Date()) {
-  return new Intl.DateTimeFormat("zh-CN", {
+  const parts = new Intl.DateTimeFormat("en-GB", {
     timeZone: reportTimeZone,
-    year: "numeric",
-    month: "long",
-    day: "numeric",
-    weekday: "long"
-  }).format(date);
+    year: "2-digit",
+    month: "2-digit",
+    day: "2-digit"
+  }).formatToParts(date);
+  const get = (type) => parts.find((part) => part.type === type)?.value || "";
+  return `PP博主更新${get("day")}${get("month")}${get("year")}`;
 }
 
 function reportTimeParts(date = new Date()) {

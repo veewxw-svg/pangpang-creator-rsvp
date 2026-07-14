@@ -273,9 +273,7 @@ def new_page():
 
 
 def draw_header(draw):
-    title = "PangPang 博主探店预约全局表"
-    if REPORT_DATE:
-        title = f"{title} {REPORT_DATE}"
+    title = REPORT_DATE or "PP博主更新"
     draw.text((M, 36), title, fill=BLACK, font=TITLE_FONT)
     y = 106
     metric_h = 90
