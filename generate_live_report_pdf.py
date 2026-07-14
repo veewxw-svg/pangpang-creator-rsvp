@@ -141,12 +141,7 @@ def payment_text(record):
 
 def is_highlighted(record):
     record_id = str(record.get("id") or "")
-    if record_id in HIGHLIGHT_IDS:
-        return True
-    try:
-        return float(record.get("highlightUntil") or 0) > time.time() * 1000
-    except (TypeError, ValueError):
-        return False
+    return record_id in HIGHLIGHT_IDS
 
 
 def date_title(record):

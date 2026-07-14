@@ -17,6 +17,10 @@ services:
         value: /tmp/pangpang-output
       - key: PYTHON_BIN
         value: python3
+      - key: REPORT_TIME_ZONE
+        value: Asia/Singapore
+      - key: DAILY_REPORT_TIME
+        value: "21:30"
       - key: SEND_EMAILS
         value: "0"
       - key: PUBLIC_URL

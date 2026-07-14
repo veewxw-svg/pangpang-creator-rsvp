@@ -1725,7 +1725,7 @@
       reviewPanel.innerHTML = `<div class="review-head">
         <div>
           <h2>确认信息</h2>
-          <p>保存后会进入后台记录，导出的 Excel 和 PDF 会高亮这次更新。</p>
+          <p>保存后会进入后台记录，今天的日报会汇总当天变动。</p>
         </div>
         <span class="chip ${escapeHtml(normalizeStatus(record.status))}">${escapeHtml(normalizeStatus(record.status))}</span>
       </div>
@@ -1898,8 +1898,7 @@
     }
 
     function isHighlighted(item) {
-      if (!item.highlightUntil) return false;
-      return Number(item.highlightUntil) > Date.now();
+      return false;
     }
 
     function csvCell(value) {

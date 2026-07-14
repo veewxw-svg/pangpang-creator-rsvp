@@ -21,6 +21,10 @@ const bundledPython = "/Users/Vee/.cache/codex-runtimes/codex-primary-runtime/de
 const pythonBin = process.env.PYTHON_BIN || (existsSync(bundledPython) ? bundledPython : "python3");
 const databaseUrl = process.env.DATABASE_URL || process.env.POSTGRES_URL || "";
 const recordsTable = process.env.RECORDS_TABLE || "creator_rsvp_records";
+const stateTable = process.env.STATE_TABLE || "creator_rsvp_state";
+const statePath = join(dataDir, "state.json");
+const reportTimeZone = process.env.REPORT_TIME_ZONE || "Asia/Singapore";
+const dailyReportTime = process.env.DAILY_REPORT_TIME || "21:30";
 let dbPoolPromise;
 let dbReadyPromise;
 
@@ -66,8 +70,27 @@ createServer(async (req, res) => {
       const records = mergeRecords(await readRecords(), incomingRecords);
       await writeRecords(records);
       const highlightIds = Array.isArray(body.highlightIds) ? body.highlightIds.map(String) : [];
-      const notification = body.silent ? { skipped: true, reason: "silent update" } : await maybeSendNotification(records, highlightIds);
+      const notification = body.silent ? { skipped: true, reason: "silent update" } : await queueDailyChanges(highlightIds);
       sendJson(res, { ok: true, count: records.length, reportUrl: "/api/report.png", notification });
+      return;
+    }
+
+    if (url.pathname === "/api/send-daily-report") {
+      const token = process.env.DAILY_REPORT_TOKEN || "";
+      const providedToken = url.searchParams.get("token") || req.headers["x-daily-report-token"] || "";
+      const force = url.searchParams.get("force") === "1";
+      if (force && (!token || providedToken !== token)) {
+        writeCors(res, 403, { "Content-Type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ ok: false, error: "Forbidden" }));
+        return;
+      }
+      if (token && providedToken !== token) {
+        writeCors(res, 403, { "Content-Type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ ok: false, error: "Forbidden" }));
+        return;
+      }
+      const result = await sendDailyReport({ force });
+      sendJson(res, result);
       return;
     }
 
@@ -109,6 +132,7 @@ createServer(async (req, res) => {
   }
 }).listen(port, () => {
   console.log(`PangPang RSVP system: http://127.0.0.1:${port}/`);
+  startDailyReportScheduler();
 });
 
 async function readRecords() {
@@ -164,10 +188,18 @@ async function ensureDbReady() {
     dbReadyPromise = (async () => {
       const pool = await getDbPool();
       const table = quoteIdentifier(recordsTable);
+      const state = quoteIdentifier(stateTable);
       await pool.query(`
         create table if not exists ${table} (
           id text primary key,
           data jsonb not null,
+          updated_at timestamptz not null default now()
+        )
+      `);
+      await pool.query(`
+        create table if not exists ${state} (
+          key text primary key,
+          value jsonb not null,
           updated_at timestamptz not null default now()
         )
       `);
@@ -250,6 +282,79 @@ async function backupRecordsSnapshot(records, source = "records") {
   }
 }
 
+async function readState(key, fallback = null) {
+  if (useDatabase()) {
+    await ensureDbReady();
+    const pool = await getDbPool();
+    const table = quoteIdentifier(stateTable);
+    const result = await pool.query(`select value from ${table} where key = $1`, [key]);
+    return result.rows[0]?.value ?? fallback;
+  }
+  try {
+    const raw = await readFile(statePath, "utf8");
+    const state = JSON.parse(raw);
+    return state?.[key] ?? fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+async function writeState(key, value) {
+  if (useDatabase()) {
+    await ensureDbReady();
+    const pool = await getDbPool();
+    const table = quoteIdentifier(stateTable);
+    await pool.query(
+      `insert into ${table} (key, value, updated_at)
+       values ($1, $2::jsonb, now())
+       on conflict (key) do update set value = excluded.value, updated_at = now()`,
+      [key, JSON.stringify(value)]
+    );
+    return;
+  }
+  await mkdir(dataDir, { recursive: true });
+  let state = {};
+  try {
+    state = JSON.parse(await readFile(statePath, "utf8"));
+  } catch {
+    state = {};
+  }
+  state[key] = value;
+  await writeFile(statePath, JSON.stringify(state, null, 2), "utf8");
+}
+
+function reportDateKey(date = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: reportTimeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).formatToParts(date);
+  const get = (type) => parts.find((part) => part.type === type)?.value || "";
+  return `${get("year")}-${get("month")}-${get("day")}`;
+}
+
+function reportTimeParts(date = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: reportTimeZone,
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false
+  }).formatToParts(date);
+  const get = (type) => Number(parts.find((part) => part.type === type)?.value || 0);
+  return { hour: get("hour"), minute: get("minute") };
+}
+
+async function queueDailyChanges(highlightIds = []) {
+  const ids = [...new Set((highlightIds || []).map(String).filter(Boolean))];
+  if (!ids.length) return { queued: false, reason: "no changed records" };
+  const key = "pendingDailyChanges";
+  const existing = Array.isArray(await readState(key, [])) ? await readState(key, []) : [];
+  const merged = [...new Set([...existing.map(String), ...ids])];
+  await writeState(key, merged);
+  return { queued: true, day: reportDateKey(), changedCount: merged.length };
+}
+
 function mergeRecords(existingRecords, incomingRecords) {
   const byId = new Map();
   for (const record of Array.isArray(existingRecords) ? existingRecords : []) {
@@ -295,7 +400,25 @@ async function writeReportRecordsSnapshot(records, filename) {
   return reportRecordsPath;
 }
 
-async function maybeSendNotification(records, highlightIds = []) {
+async function sendDailyReport({ force = false } = {}) {
+  const day = reportDateKey();
+  const lastSentDay = await readState("lastDailyReportDay", "");
+  if (!force && lastSentDay === day) {
+    return { ok: true, sent: false, reason: "already sent today", day };
+  }
+  const records = await readRecords();
+  const changedIds = Array.isArray(await readState("pendingDailyChanges", []))
+    ? [...new Set((await readState("pendingDailyChanges", [])).map(String).filter(Boolean))]
+    : [];
+  const result = await sendDailyReportEmail(records, changedIds, day);
+  if (result.sent) {
+    await writeState("lastDailyReportDay", day);
+    await writeState("pendingDailyChanges", []);
+  }
+  return { ok: true, day, changedCount: changedIds.length, ...result };
+}
+
+async function sendDailyReportEmail(records, highlightIds = [], day = reportDateKey()) {
   if (process.env.SEND_EMAILS !== "1") {
     return { sent: false, reason: "email disabled" };
   }
@@ -303,9 +426,15 @@ async function maybeSendNotification(records, highlightIds = []) {
     return { sent: false, reason: "missing email env" };
   }
 
-  await generateReportPdf(records, highlightIds);
-  const pdf = await readFile(reportPdfPath);
-  const subject = process.env.NOTIFY_SUBJECT || "PangPang 博主探店预约更新";
+  const hasChanges = highlightIds.length > 0;
+  let pdf = null;
+  if (hasChanges) {
+    await generateReportPdf(records, highlightIds);
+    pdf = await readFile(reportPdfPath);
+  }
+  const subject = hasChanges
+    ? (process.env.NOTIFY_SUBJECT || `PangPang 博主探店预约日报 ${day}`)
+    : `PangPang 博主探店预约日报 ${day}：今天没有改变`;
   const to = process.env.NOTIFY_TO.split(",").map((item) => item.trim()).filter(Boolean);
   const payload = {
     from: process.env.NOTIFY_FROM,
@@ -313,18 +442,20 @@ async function maybeSendNotification(records, highlightIds = []) {
     subject,
     html: [
       "<div style=\"font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#1d1d1f\">",
-      "<h2>PangPang 博主探店预约更新</h2>",
-      "<p>最新全局表 PDF 已附在邮件里。浅蓝=本次新增预约，浅绿=本次发帖更新，浅红=取消。</p>",
-      "<p>主页和帖子按钮放在 PDF 里，可直接点击打开。</p>",
+      "<h2>PangPang 博主探店预约日报</h2>",
+      hasChanges
+        ? `<p>${day} 共有 ${highlightIds.length} 条变动，最新全局表 PDF 已附在邮件里。浅蓝=当天新增预约，浅绿=当天发帖更新，浅红=取消。</p>`
+        : `<p>${day} 今天没有改变。</p>`,
+      hasChanges ? "<p>主页和帖子按钮放在 PDF 里，可直接点击打开。</p>" : "",
       "</div>"
-    ].join(""),
-    attachments: [
-      {
+    ].join("")
+  };
+  if (pdf) {
+    payload.attachments = [{
         filename: "PangPang_博主探店预约全局表.pdf",
         content: pdf.toString("base64")
-      }
-    ]
-  };
+    }];
+  }
 
   const response = await fetch("https://api.resend.com/emails", {
     method: "POST",
@@ -337,6 +468,23 @@ async function maybeSendNotification(records, highlightIds = []) {
   const result = await response.json().catch(() => ({}));
   if (!response.ok) return { sent: false, status: response.status, result };
   return { sent: true, result };
+}
+
+function startDailyReportScheduler() {
+  const [targetHour, targetMinute] = dailyReportTime.split(":").map((part) => Number(part));
+  if (!Number.isFinite(targetHour) || !Number.isFinite(targetMinute)) return;
+  setInterval(async () => {
+    try {
+      if (process.env.SEND_EMAILS !== "1") return;
+      const { hour, minute } = reportTimeParts();
+      const nowMinutes = hour * 60 + minute;
+      const targetMinutes = targetHour * 60 + targetMinute;
+      if (nowMinutes < targetMinutes) return;
+      await sendDailyReport();
+    } catch (error) {
+      console.error("Daily report failed:", error.message || error);
+    }
+  }, 60 * 1000);
 }
 
 async function readJsonBody(req) {
@@ -431,8 +579,6 @@ async function resolveProfile(target) {
 
 async function fetchPage(target) {
   if (/instagram\.com|instagr\.am/i.test(target)) {
-    const isPost = /\/(?:p|reel|reels)\//i.test(target);
-    if (isPost) return fetchInstagramPostPage(target);
     return fetchPageWithCurl(target, { minimal: true });
   }
   if (/xiaohongshu\.com|xhslink\.com/i.test(target)) {
@@ -457,37 +603,17 @@ async function fetchPage(target) {
   }
 }
 
-async function fetchInstagramPostPage(target) {
-  const userAgents = [
-    "facebookexternalhit/1.1",
-    "Twitterbot/1.0",
-    "Slackbot-LinkExpanding 1.0 (+https://api.slack.com/robots)",
-    "LinkedInBot/1.0",
-    "WhatsApp/2.23.20.0"
-  ];
-  let fallback = null;
-  for (const userAgent of userAgents) {
-    const page = await fetchPageWithCurl(target, { userAgent, maxTime: 10 });
-    fallback ||= page;
-    const meta = collectMeta(page.html || "");
-    if (page.status >= 200 && page.status < 400 && (meta.description || meta.ogDescription || meta.ogTitle)) {
-      return page;
-    }
-  }
-  return fallback || fetchPageWithCurl(target, { userAgent: userAgents[0], maxTime: 10 });
-}
-
 async function fetchPageWithCurl(target, options = {}) {
   const args = [
     "-L",
     "-sS",
     "--max-time",
-    String(options.maxTime || 15),
+    "15",
   ];
   if (!options.minimal) {
     args.push(
       "-A",
-      options.userAgent || "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36",
+      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36",
       "-H",
       "Accept-Language: zh-CN,zh;q=0.9,en;q=0.8"
     );
@@ -507,7 +633,6 @@ function collectMeta(html) {
     description: decodeEntities(get(/<meta[^>]+name=["']description["'][^>]+content=["']([^"']*)["'][^>]*>/i) || get(/<meta[^>]+content=["']([^"']*)["'][^>]+name=["']description["'][^>]*>/i)),
     ogTitle: decodeEntities(get(/<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']*)["'][^>]*>/i) || get(/<meta[^>]+content=["']([^"']*)["'][^>]+property=["']og:title["'][^>]*>/i)),
     ogDescription: decodeEntities(get(/<meta[^>]+property=["']og:description["'][^>]+content=["']([^"']*)["'][^>]*>/i) || get(/<meta[^>]+content=["']([^"']*)["'][^>]+property=["']og:description["'][^>]*>/i)),
-    ogUrl: decodeEntities(get(/<meta[^>]+property=["']og:url["'][^>]+content=["']([^"']*)["'][^>]*>/i) || get(/<meta[^>]+content=["']([^"']*)["'][^>]+property=["']og:url["'][^>]*>/i)),
     articlePublishedTime: decodeEntities(get(/<meta[^>]+property=["']article:published_time["'][^>]+content=["']([^"']*)["'][^>]*>/i) || get(/<meta[^>]+content=["']([^"']*)["'][^>]+property=["']article:published_time["'][^>]*>/i))
   };
 }
@@ -551,17 +676,15 @@ function parseInstagramMeta(meta, html, finalUrl) {
   const isPost = /\/(?:p|reel|reels)\//i.test(finalUrl);
   const titleMatch = title.match(/^(.+?)\s+\(@([^)]+)\)/);
   const descMatch = description.match(/-\s*(.+?)\s+\(@([^)]+)\)\s+on Instagram/i);
-  const ownerDateMatch = description.match(/-\s*([A-Za-z0-9_.]+)\s+on\s+([A-Za-z]+)\s+(\d{1,2}),\s+(20\d{2})/i);
   const postTitleMatch = title.match(/^(.+?)\s+on Instagram\s*:/i) || description.match(/-\s*(.+?)\s+on Instagram\s*:/i);
   const stats = readInstagramStats([description, fallback, title, stripTags(html).slice(0, 3000)].filter(Boolean));
   const bioMatch = description.match(/on Instagram:\s*"([^"]*)"/i);
-  const rawUrlHandle = (meta.ogUrl || finalUrl).match(/instagram\.com\/([^/?#]+)/i)?.[1] || "";
+  const rawUrlHandle = finalUrl.match(/instagram\.com\/([^/?#]+)/i)?.[1] || "";
   const urlHandle = isInstagramReservedSegment(rawUrlHandle) ? "" : rawUrlHandle;
-  const handle = titleMatch?.[2] || descMatch?.[2] || ownerDateMatch?.[1] || urlHandle;
+  const handle = titleMatch?.[2] || descMatch?.[2] || urlHandle;
   const following = stats.following || "";
   const postCount = stats.postCount || "";
-  const instagramDateText = [description, fallback, title, meta.ogTitle, meta.ogDescription, meta.title].filter(Boolean).join(" ");
-  const publishedAt = parseInstagramPublishedAt(instagramDateText) || parsePublishedAt(html, meta);
+  const publishedAt = parsePublishedAt(html, meta);
   const likeMatch = description.match(/([\d,.KMkm]+)\s+likes?/i);
   const commentMatch = description.match(/([\d,.KMkm]+)\s+comments?/i);
   const profileUrl = handle ? `https://www.instagram.com/${handle.replace(/^@/, "")}/` : finalUrl;
@@ -586,24 +709,6 @@ function parseInstagramMeta(meta, html, finalUrl) {
     postTitle: title.replace(/\s*•\s*Instagram.*/i, "").trim(),
     publishedAt
   };
-}
-
-function parseInstagramPublishedAt(text) {
-  const source = String(text || "");
-  const match = source.match(/(?:\bon\s+|[,，]\s*)?([A-Za-z]+)\s+(\d{1,2}),\s+(20\d{2})\b/i);
-  const months = {
-    january: 1, jan: 1, february: 2, feb: 2, march: 3, mar: 3, april: 4, apr: 4,
-    may: 5, june: 6, jun: 6, july: 7, jul: 7, august: 8, aug: 8,
-    september: 9, sep: 9, sept: 9, october: 10, oct: 10,
-    november: 11, nov: 11, december: 12, dec: 12
-  };
-  if (match) {
-    const month = months[match[1].toLowerCase()];
-    return datePartsToIso(Number(match[3]), month, Number(match[2]));
-  }
-  const zhMatch = source.match(/(20\d{2})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日/);
-  if (zhMatch) return datePartsToIso(Number(zhMatch[1]), Number(zhMatch[2]), Number(zhMatch[3]));
-  return "";
 }
 
 async function fetchInstagramProfileJson(target, finalUrl) {

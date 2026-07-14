@@ -144,12 +144,7 @@ def payment_text(record):
 
 def is_highlighted(record):
     record_id = str(record.get("id") or "")
-    if record_id in HIGHLIGHT_IDS:
-        return True
-    try:
-        return float(record.get("highlightUntil") or 0) > time.time() * 1000
-    except (TypeError, ValueError):
-        return False
+    return record_id in HIGHLIGHT_IDS
 
 
 def short_text(value, max_chars):
@@ -263,7 +258,7 @@ small_f = font(20)
 tiny_f = font(18)
 
 d.text((70, 54), "PangPang 博主探店预约全局表", fill=black, font=title_f)
-d.text((70, 124), "邮件通知版｜按预约时间排序｜每次新增或发帖更新会高亮整行｜长链接隐藏成查看按钮", fill=muted, font=sub_f)
+d.text((70, 124), "邮件通知版｜按预约时间排序｜日报只高亮当天变动｜长链接隐藏成查看按钮", fill=muted, font=sub_f)
 
 d.rounded_rectangle((70, 174, 2410, 300), radius=24, fill=header_bg)
 metrics = [
