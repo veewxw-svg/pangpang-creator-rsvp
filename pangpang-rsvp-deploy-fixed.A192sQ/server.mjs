@@ -1,0 +1,1376 @@
+import { createServer } from "node:http";
+import { execFile } from "node:child_process";
+import { existsSync } from "node:fs";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { extname, join, normalize } from "node:path";
+import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
+
+const root = fileURLToPath(new URL(".", import.meta.url));
+const port = Number(process.env.PORT || 8787);
+const runFile = promisify(execFile);
+const dataDir = process.env.DATA_DIR || join(root, "data");
+const recordsPath = join(dataDir, "records.json");
+const backupDir = join(dataDir, "backups");
+const outputDir = process.env.OUTPUT_DIR || join(root, "output");
+const reportPath = join(outputDir, "pangpang_creator_report.png");
+const reportScript = join(root, "generate_live_report_png.py");
+const reportPdfPath = join(outputDir, "pangpang_creator_report.pdf");
+const reportPdfScript = join(root, "generate_live_report_pdf.py");
+const bundledPython = "/Users/Vee/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3";
+const pythonBin = process.env.PYTHON_BIN || (existsSync(bundledPython) ? bundledPython : "python3");
+const databaseUrl = process.env.DATABASE_URL || process.env.POSTGRES_URL || "";
+const recordsTable = process.env.RECORDS_TABLE || "creator_rsvp_records";
+const stateTable = process.env.STATE_TABLE || "creator_rsvp_state";
+const statePath = join(dataDir, "state.json");
+const reportTimeZone = process.env.REPORT_TIME_ZONE || "Asia/Singapore";
+const dailyReportTime = process.env.DAILY_REPORT_TIME || "21:30";
+const apifyToken = process.env.APIFY_TOKEN || "";
+const apifyInstagramActor = process.env.APIFY_IG_ACTOR || "apify/instagram-scraper";
+let dbPoolPromise;
+let dbReadyPromise;
+let recordsWriteQueue = Promise.resolve();
+
+const mime = {
+  ".html": "text/html; charset=utf-8",
+  ".js": "text/javascript; charset=utf-8",
+  ".webmanifest": "application/manifest+json; charset=utf-8",
+  ".json": "application/json; charset=utf-8",
+  ".png": "image/png",
+  ".pdf": "application/pdf"
+};
+
+createServer(async (req, res) => {
+  try {
+    if (req.method === "OPTIONS") {
+      writeCors(res, 204, { "Content-Type": "text/plain; charset=utf-8" });
+      res.end();
+      return;
+    }
+
+    const url = new URL(req.url || "/", `http://${req.headers.host}`);
+    if (url.pathname === "/api/resolve-profile") {
+      const target = url.searchParams.get("url") || "";
+      const payload = await resolveProfile(target);
+      sendJson(res, payload);
+      return;
+    }
+
+    if (url.pathname === "/api/records" && req.method === "GET") {
+      sendJson(res, { ok: true, storage: useDatabase() ? "database" : "file", records: await readRecords() });
+      return;
+    }
+
+    if (url.pathname === "/api/health") {
+      const records = await readRecords();
+      sendJson(res, { ok: true, storage: useDatabase() ? "database" : "file", count: records.length });
+      return;
+    }
+
+    if (url.pathname === "/api/records" && req.method === "POST") {
+      const body = await readJsonBody(req);
+      const incomingRecords = Array.isArray(body.records) ? body.records : [];
+      const highlightIds = Array.isArray(body.highlightIds) ? body.highlightIds.map(String) : [];
+      const result = await withRecordsWriteLock(async () => {
+        const existingRecords = await readRecords();
+        const existingIds = new Set(existingRecords.map((record) => String(record?.id || "")).filter(Boolean));
+        const changedIds = new Set([
+          ...highlightIds,
+          ...incomingRecords
+            .filter((record) => record?.id && !existingIds.has(String(record.id)))
+            .map((record) => String(record.id))
+        ]);
+        const records = mergeRecords(existingRecords, incomingRecords);
+        const duplicate = findChangedDuplicate(records, changedIds);
+        if (duplicate) return { duplicate };
+
+        await writeRecords(records);
+        const notification = body.silent ? { skipped: true, reason: "silent update" } : await queueDailyChanges(highlightIds);
+        return { records, notification };
+      });
+
+      if (result.duplicate) {
+        sendJson(res, {
+          ok: false,
+          error: "DUPLICATE_RECORD",
+          message: duplicateMessage(result.duplicate.record, result.duplicate.existing),
+          duplicateId: String(result.duplicate.existing.id || "")
+        }, 409);
+        return;
+      }
+
+      sendJson(res, { ok: true, count: result.records.length, reportUrl: "/api/report.png", notification: result.notification });
+      return;
+    }
+
+    if (url.pathname === "/api/send-daily-report") {
+      const token = process.env.DAILY_REPORT_TOKEN || "";
+      const providedToken = url.searchParams.get("token") || req.headers["x-daily-report-token"] || "";
+      const force = url.searchParams.get("force") === "1";
+      if (force && (!token || providedToken !== token)) {
+        writeCors(res, 403, { "Content-Type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ ok: false, error: "Forbidden" }));
+        return;
+      }
+      if (token && providedToken !== token) {
+        writeCors(res, 403, { "Content-Type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ ok: false, error: "Forbidden" }));
+        return;
+      }
+      const result = await sendDailyReport({ force });
+      sendJson(res, result);
+      return;
+    }
+
+    if (url.pathname === "/api/report.png") {
+      const records = await readRecords();
+      await generateReportPng(records);
+      const body = await readFile(reportPath);
+      writeCors(res, 200, {
+        "Content-Type": "image/png",
+        "Cache-Control": "no-store"
+      });
+      res.end(body);
+      return;
+    }
+
+    if (url.pathname === "/api/report.pdf") {
+      const records = await readRecords();
+      await generateReportPdf(records);
+      const body = await readFile(reportPdfPath);
+      writeCors(res, 200, {
+        "Content-Type": "application/pdf",
+        "Cache-Control": "no-store",
+        "Content-Disposition": "inline; filename=\"PangPang_creator_report.pdf\""
+      });
+      res.end(body);
+      return;
+    }
+
+    const pathname = url.pathname === "/" ? "/index.html" : decodeURIComponent(url.pathname);
+    const safePath = normalize(pathname).replace(/^(\.\.[/\\])+/, "");
+    const filePath = join(root, safePath);
+    if (!filePath.startsWith(root)) throw new Error("Forbidden");
+    const body = await readFile(filePath);
+    writeCors(res, 200, { "Content-Type": mime[extname(filePath)] || "application/octet-stream" });
+    res.end(body);
+  } catch (error) {
+    writeCors(res, 404, { "Content-Type": "text/plain; charset=utf-8" });
+    res.end(String(error.message || error));
+  }
+}).listen(port, () => {
+  console.log(`PangPang RSVP system: http://127.0.0.1:${port}/`);
+  startDailyReportScheduler();
+});
+
+async function readRecords() {
+  if (useDatabase()) return readDbRecords();
+  return readFileRecords();
+}
+
+async function readFileRecords() {
+  try {
+    const data = await readFile(recordsPath, "utf8");
+    const records = JSON.parse(data);
+    return Array.isArray(records) ? records : [];
+  } catch {
+    return [];
+  }
+}
+
+async function writeRecords(records) {
+  if (useDatabase()) {
+    await writeDbRecords(records);
+    await backupRecordsSnapshot(records, "database");
+    return;
+  }
+  await mkdir(dataDir, { recursive: true });
+  await backupRecords();
+  await writeFile(recordsPath, JSON.stringify(records, null, 2), "utf8");
+}
+
+function useDatabase() {
+  return Boolean(databaseUrl);
+}
+
+async function getDbPool() {
+  if (!dbPoolPromise) {
+    dbPoolPromise = import("pg").then(({ Pool }) => new Pool({
+      connectionString: databaseUrl,
+      ssl: shouldUseDatabaseSsl(databaseUrl) ? { rejectUnauthorized: false } : false
+    }));
+  }
+  return dbPoolPromise;
+}
+
+function shouldUseDatabaseSsl(url) {
+  return !/localhost|127\.0\.0\.1|::1/i.test(String(url || ""));
+}
+
+function quoteIdentifier(value) {
+  return String(value || "").replace(/[^a-zA-Z0-9_]/g, "") || "creator_rsvp_records";
+}
+
+async function ensureDbReady() {
+  if (!dbReadyPromise) {
+    dbReadyPromise = (async () => {
+      const pool = await getDbPool();
+      const table = quoteIdentifier(recordsTable);
+      const state = quoteIdentifier(stateTable);
+      await pool.query(`
+        create table if not exists ${table} (
+          id text primary key,
+          data jsonb not null,
+          updated_at timestamptz not null default now()
+        )
+      `);
+      await pool.query(`
+        create table if not exists ${state} (
+          key text primary key,
+          value jsonb not null,
+          updated_at timestamptz not null default now()
+        )
+      `);
+      await migrateFileRecordsToDatabase();
+    })();
+  }
+  return dbReadyPromise;
+}
+
+async function migrateFileRecordsToDatabase() {
+  const fileRecords = await readFileRecords();
+  if (!fileRecords.length) return;
+  const dbRecords = await readDbRecordsRaw();
+  if (dbRecords.length) return;
+  await writeDbRecordsRaw(fileRecords);
+}
+
+async function readDbRecords() {
+  await ensureDbReady();
+  return readDbRecordsRaw();
+}
+
+async function readDbRecordsRaw() {
+  const pool = await getDbPool();
+  const table = quoteIdentifier(recordsTable);
+  const result = await pool.query(`select data from ${table} order by updated_at asc`);
+  return result.rows.map((row) => row.data).filter(Boolean);
+}
+
+async function writeDbRecords(records) {
+  await ensureDbReady();
+  return writeDbRecordsRaw(records);
+}
+
+async function writeDbRecordsRaw(records) {
+  const cleanRecords = Array.isArray(records) ? records.filter((record) => record && record.id) : [];
+  const pool = await getDbPool();
+  const table = quoteIdentifier(recordsTable);
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    for (const record of cleanRecords) {
+      await client.query(
+        `insert into ${table} (id, data, updated_at)
+         values ($1, $2::jsonb, now())
+         on conflict (id) do update set data = excluded.data, updated_at = now()`,
+        [String(record.id), JSON.stringify(record)]
+      );
+    }
+    await client.query("commit");
+  } catch (error) {
+    await client.query("rollback").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+async function backupRecords() {
+  try {
+    const existing = await readFile(recordsPath, "utf8");
+    const current = JSON.parse(existing);
+    if (!Array.isArray(current) || !current.length) return;
+    await mkdir(backupDir, { recursive: true });
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    await writeFile(join(backupDir, `records-${stamp}.json`), existing, "utf8");
+  } catch {
+    // Backups are best-effort; saving should still work if no previous file exists.
+  }
+}
+
+async function backupRecordsSnapshot(records, source = "records") {
+  try {
+    if (!Array.isArray(records) || !records.length) return;
+    await mkdir(backupDir, { recursive: true });
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    await writeFile(join(backupDir, `${source}-${stamp}.json`), JSON.stringify(records, null, 2), "utf8");
+  } catch {
+    // Backups are best-effort; the database remains the source of truth.
+  }
+}
+
+async function readState(key, fallback = null) {
+  if (useDatabase()) {
+    await ensureDbReady();
+    const pool = await getDbPool();
+    const table = quoteIdentifier(stateTable);
+    const result = await pool.query(`select value from ${table} where key = $1`, [key]);
+    return result.rows[0]?.value ?? fallback;
+  }
+  try {
+    const raw = await readFile(statePath, "utf8");
+    const state = JSON.parse(raw);
+    return state?.[key] ?? fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+async function writeState(key, value) {
+  if (useDatabase()) {
+    await ensureDbReady();
+    const pool = await getDbPool();
+    const table = quoteIdentifier(stateTable);
+    await pool.query(
+      `insert into ${table} (key, value, updated_at)
+       values ($1, $2::jsonb, now())
+       on conflict (key) do update set value = excluded.value, updated_at = now()`,
+      [key, JSON.stringify(value)]
+    );
+    return;
+  }
+  await mkdir(dataDir, { recursive: true });
+  let state = {};
+  try {
+    state = JSON.parse(await readFile(statePath, "utf8"));
+  } catch {
+    state = {};
+  }
+  state[key] = value;
+  await writeFile(statePath, JSON.stringify(state, null, 2), "utf8");
+}
+
+function reportDateKey(date = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: reportTimeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).formatToParts(date);
+  const get = (type) => parts.find((part) => part.type === type)?.value || "";
+  return `${get("year")}-${get("month")}-${get("day")}`;
+}
+
+function readableReportDate(date = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: reportTimeZone,
+    year: "2-digit",
+    month: "2-digit",
+    day: "2-digit"
+  }).formatToParts(date);
+  const get = (type) => parts.find((part) => part.type === type)?.value || "";
+  return `PP博主更新${get("day")}${get("month")}${get("year")}`;
+}
+
+function reportTimeParts(date = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: reportTimeZone,
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false
+  }).formatToParts(date);
+  const get = (type) => Number(parts.find((part) => part.type === type)?.value || 0);
+  return { hour: get("hour"), minute: get("minute") };
+}
+
+async function queueDailyChanges(highlightIds = []) {
+  const ids = [...new Set((highlightIds || []).map(String).filter(Boolean))];
+  if (!ids.length) return { queued: false, reason: "no changed records" };
+  const key = "pendingDailyChanges";
+  const existing = Array.isArray(await readState(key, [])) ? await readState(key, []) : [];
+  const merged = [...new Set([...existing.map(String), ...ids])];
+  await writeState(key, merged);
+  return { queued: true, day: reportDateKey(), changedCount: merged.length };
+}
+
+function mergeRecords(existingRecords, incomingRecords) {
+  const byId = new Map();
+  for (const record of Array.isArray(existingRecords) ? existingRecords : []) {
+    if (record && record.id) byId.set(String(record.id), record);
+  }
+  for (const record of Array.isArray(incomingRecords) ? incomingRecords : []) {
+    if (record && record.id) byId.set(String(record.id), record);
+  }
+  return Array.from(byId.values());
+}
+
+function withRecordsWriteLock(task) {
+  const run = recordsWriteQueue.then(task, task);
+  recordsWriteQueue = run.then(() => undefined, () => undefined);
+  return run;
+}
+
+function findChangedDuplicate(records, changedIds) {
+  const list = Array.isArray(records) ? records.filter((record) => record?.id) : [];
+  const ids = changedIds instanceof Set ? changedIds : new Set(changedIds || []);
+  for (const record of list) {
+    if (!ids.has(String(record.id))) continue;
+    const keys = duplicateKeys(record);
+    if (!keys.length) continue;
+    const existing = list.find((item) => {
+      if (String(item.id) === String(record.id)) return false;
+      const otherKeys = duplicateKeys(item);
+      return otherKeys.some((key) => keys.includes(key));
+    });
+    if (existing) return { record, existing };
+  }
+  return null;
+}
+
+function duplicateKeys(record) {
+  if (!record || normalizedRecordStatus(record.status) === "取消") return [];
+  const keys = [];
+  const post = canonicalRecordUrlIdentity(canonicalRecordPostUrl(record.postUrl || ""));
+  if (post) keys.push(`post:${post}`);
+
+  const creator = creatorIdentity(record);
+  const date = normalizeRecordText(record.dateISO || record.dateText || "");
+  const time = normalizeRecordText(record.timeText || "");
+  if (creator && record.type !== "post" && date && time) {
+    keys.push(`booking:${creator}:${date}:${time}`);
+  }
+  return keys;
+}
+
+function creatorIdentity(record) {
+  const profile = canonicalRecordUrlIdentity(canonicalRecordCreatorUrl(record.link || record.profileUrl || ""));
+  if (profile) return `url:${profile}`;
+  const platform = normalizeRecordText(record.platform || "");
+  const handle = normalizeRecordText(record.handle || "").replace(/^@/, "");
+  if (platform && handle) return `handle:${platform}:${handle}`;
+  const name = normalizeRecordText(record.name || "");
+  return platform && name ? `name:${platform}:${name}` : "";
+}
+
+function canonicalRecordWebUrl(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  try {
+    const url = new URL(raw);
+    if (!["http:", "https:"].includes(url.protocol) || !url.hostname) return "";
+    [
+      "appuid", "apptime", "share_id", "wechatWid", "wechatOrigin",
+      "xhsshare", "appshare", "shareRedId", "source"
+    ].forEach((key) => url.searchParams.delete(key));
+    url.hash = "";
+    return url.href;
+  } catch {
+    return "";
+  }
+}
+
+function canonicalRecordCreatorUrl(value) {
+  const safe = canonicalRecordWebUrl(value);
+  if (!safe) return "";
+  const url = new URL(safe);
+  const host = url.hostname.replace(/^www\./, "").toLowerCase();
+  const path = url.pathname.replace(/\/+$/, "");
+  if (/xiaohongshu\.com$/.test(host) && /^\/user\/profile\/[^/]+$/i.test(path)) return safe;
+  if (/instagram\.com$/.test(host)) {
+    const segment = path.split("/").filter(Boolean)[0] || "";
+    if (segment && !["p", "reel", "reels", "explore", "accounts", "direct", "stories", "share"].includes(segment.toLowerCase())) {
+      return safe;
+    }
+  }
+  if (/tiktok\.com$/.test(host) && /^\/@[^/]+$/i.test(path)) return safe;
+  if (/facebook\.com$/.test(host) && path && !/^\/(?:share|watch|reel|photo)/i.test(path)) return safe;
+  return "";
+}
+
+function canonicalRecordPostUrl(value) {
+  const safe = canonicalRecordWebUrl(value);
+  if (!safe) return "";
+  const url = new URL(safe);
+  const host = url.hostname.replace(/^www\./, "").toLowerCase();
+  const path = url.pathname.replace(/\/+$/, "");
+  if (/xiaohongshu\.com$/.test(host) && /^\/(?:explore|discovery\/item)\/[^/]+$/i.test(path)) return safe;
+  if (/xhslink\.com$/.test(host) && path) return safe;
+  if (/instagram\.com$/.test(host) && /^\/(?:p|reel|reels)\/[^/]+$/i.test(path)) return safe;
+  if (/tiktok\.com$/.test(host) && /\/video\/[^/]+$/i.test(path)) return safe;
+  return "";
+}
+
+function canonicalRecordUrlIdentity(value) {
+  if (!value) return "";
+  const url = new URL(value);
+  return `${url.hostname.replace(/^www\./, "").toLowerCase()}${url.pathname.replace(/\/+$/, "").toLowerCase()}`;
+}
+
+function normalizeRecordText(value) {
+  return String(value || "").trim().toLowerCase().replace(/\s+/g, "");
+}
+
+function normalizedRecordStatus(status) {
+  if (status === "已发布") return "已发布";
+  if (status === "取消") return "取消";
+  return "新增";
+}
+
+function duplicateMessage(record, existing) {
+  const creator = existing?.name || existing?.handle || record?.name || record?.handle || "这位博主";
+  const schedule = [existing?.dateText || existing?.dateISO, existing?.timeText].filter(Boolean).join(" ");
+  return `重复提醒：${creator}${schedule ? ` · ${schedule}` : ""} 的相同记录已经存在，本次没有重复保存。`;
+}
+
+async function generateReportPng(records, highlightIds = []) {
+  await mkdir(outputDir, { recursive: true });
+  const reportRecordsPath = await writeReportRecordsSnapshot(records, "report-records-png.json");
+  await runFile(pythonBin, [reportScript], {
+    env: {
+      ...process.env,
+      PANGPANG_RECORDS_JSON: reportRecordsPath,
+      PANGPANG_REPORT_OUT: reportPath,
+      PANGPANG_HIGHLIGHT_IDS: highlightIds.join(",")
+    },
+    maxBuffer: 1024 * 1024
+  });
+}
+
+async function generateReportPdf(records, highlightIds = [], reportDate = readableReportDate()) {
+  await mkdir(outputDir, { recursive: true });
+  const reportRecordsPath = await writeReportRecordsSnapshot(records, "report-records-pdf.json");
+  await runFile(pythonBin, [reportPdfScript], {
+    env: {
+      ...process.env,
+      PANGPANG_RECORDS_JSON: reportRecordsPath,
+      PANGPANG_REPORT_PDF_OUT: reportPdfPath,
+      PANGPANG_HIGHLIGHT_IDS: highlightIds.join(","),
+      PANGPANG_REPORT_DATE: reportDate
+    },
+    maxBuffer: 1024 * 1024
+  });
+}
+
+async function writeReportRecordsSnapshot(records, filename) {
+  const reportRecordsPath = join(outputDir, filename);
+  await writeFile(reportRecordsPath, JSON.stringify(Array.isArray(records) ? records : [], null, 2), "utf8");
+  return reportRecordsPath;
+}
+
+async function sendDailyReport({ force = false } = {}) {
+  const day = reportDateKey();
+  const lastSentDay = await readState("lastDailyReportDay", "");
+  if (!force && lastSentDay === day) {
+    return { ok: true, sent: false, reason: "already sent today", day };
+  }
+  const records = await readRecords();
+  const changedIds = Array.isArray(await readState("pendingDailyChanges", []))
+    ? [...new Set((await readState("pendingDailyChanges", [])).map(String).filter(Boolean))]
+    : [];
+  const result = await sendDailyReportEmail(records, changedIds, day);
+  if (result.sent) {
+    await writeState("lastDailyReportDay", day);
+    await writeState("pendingDailyChanges", []);
+  }
+  return { ok: true, day, changedCount: changedIds.length, ...result };
+}
+
+async function sendDailyReportEmail(records, highlightIds = [], day = reportDateKey()) {
+  if (process.env.SEND_EMAILS !== "1") {
+    return { sent: false, reason: "email disabled" };
+  }
+  if (!process.env.RESEND_API_KEY || !process.env.NOTIFY_TO || !process.env.NOTIFY_FROM) {
+    return { sent: false, reason: "missing email env" };
+  }
+
+  const hasChanges = highlightIds.length > 0;
+  const summaryHtml = buildDailySummaryHtml(records, highlightIds);
+  let pdf = null;
+  if (hasChanges) {
+    await generateReportPdf(records, highlightIds, readableReportDate());
+    pdf = await readFile(reportPdfPath);
+  }
+  const subject = hasChanges
+    ? (process.env.NOTIFY_SUBJECT || `PangPang 博主探店预约日报 ${day}`)
+    : `PangPang 博主探店预约日报 ${day}：今天没有改变`;
+  const to = process.env.NOTIFY_TO.split(",").map((item) => item.trim()).filter(Boolean);
+  const payload = {
+    from: process.env.NOTIFY_FROM,
+    to,
+    subject,
+    html: [
+      "<div style=\"font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#1d1d1f\">",
+      "<h2>PangPang 博主探店预约日报</h2>",
+      hasChanges
+        ? `<p>${day} 共有 ${highlightIds.length} 条变动，最新全局表 PDF 已附在邮件里。浅蓝=当天新增预约，浅绿=当天发帖更新，浅红=取消。</p>`
+        : `<p>${day} 今天没有改变。</p>`,
+      hasChanges ? summaryHtml : "",
+      hasChanges ? "<p>主页和帖子按钮放在 PDF 里，可直接点击打开。</p>" : "",
+      "</div>"
+    ].join("")
+  };
+  if (pdf) {
+    payload.attachments = [{
+        filename: "PangPang_博主探店预约全局表.pdf",
+        content: pdf.toString("base64")
+    }];
+  }
+
+  const response = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${process.env.RESEND_API_KEY}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(payload)
+  });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok) return { sent: false, status: response.status, result };
+  return { sent: true, result };
+}
+
+function buildDailySummaryHtml(records, highlightIds = []) {
+  const changed = new Set((highlightIds || []).map(String));
+  const groups = {
+    added: [],
+    published: [],
+    cancelled: []
+  };
+  for (const record of Array.isArray(records) ? records : []) {
+    if (!changed.has(String(record?.id || ""))) continue;
+    const status = normalizeStatusText(record.status);
+    if (status === "取消") groups.cancelled.push(record);
+    else if (status === "已发布") groups.published.push(record);
+    else groups.added.push(record);
+  }
+  const section = (title, items) => {
+    const rows = items.map((record) => `<li>${escapeHtml(recordBrief(record))}</li>`).join("");
+    return `<div style="margin:14px 0 0"><b>${title}（${items.length}）</b>${items.length ? `<ul style="margin:8px 0 0 18px;padding:0;line-height:1.55">${rows}</ul>` : "<p style=\"margin:6px 0 0;color:#86868b\">无</p>"}</div>`;
+  };
+  return [
+    "<div style=\"margin:16px 0;padding:14px 16px;background:#f5f5f7;border-radius:14px\">",
+    "<h3 style=\"margin:0 0 8px;font-size:18px\">今日简报</h3>",
+    section("新增/更新", groups.added),
+    section("已发布", groups.published),
+    section("取消", groups.cancelled),
+    "</div>"
+  ].join("");
+}
+
+function recordBrief(record) {
+  const name = record.name || record.handle || "未识别账号";
+  const bookingTime = [record.dateText, record.timeText].filter(Boolean).join(" ");
+  const people = record.pax ? `${record.pax} pax` : "";
+  const phone = record.phone ? `电话 ${record.phone}` : "";
+  const platform = record.platform || "";
+  const post = record.postMetricsText ? `帖子数据 ${record.postMetricsText}` : "";
+  const postedAt = record.postDateText || "";
+  return [name, platform, bookingTime, people, phone, postedAt ? `发帖 ${postedAt}` : "", post].filter(Boolean).join(" · ");
+}
+
+function normalizeStatusText(status) {
+  const text = String(status || "").trim();
+  if (text === "已发布" || text === "发布" || text === "发帖") return "已发布";
+  if (text === "取消" || text === "已取消") return "取消";
+  return "新增";
+}
+
+function escapeHtml(value) {
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function startDailyReportScheduler() {
+  const [targetHour, targetMinute] = dailyReportTime.split(":").map((part) => Number(part));
+  if (!Number.isFinite(targetHour) || !Number.isFinite(targetMinute)) return;
+  setInterval(async () => {
+    try {
+      if (process.env.SEND_EMAILS !== "1") return;
+      const { hour, minute } = reportTimeParts();
+      const nowMinutes = hour * 60 + minute;
+      const targetMinutes = targetHour * 60 + targetMinute;
+      if (nowMinutes < targetMinutes) return;
+      await sendDailyReport();
+    } catch (error) {
+      console.error("Daily report failed:", error.message || error);
+    }
+  }, 60 * 1000);
+}
+
+async function readJsonBody(req) {
+  const chunks = [];
+  for await (const chunk of req) chunks.push(chunk);
+  const raw = Buffer.concat(chunks).toString("utf8");
+  if (!raw) return {};
+  return JSON.parse(raw);
+}
+
+async function resolveProfile(target) {
+  if (!/^https?:\/\//i.test(target)) {
+    return { ok: false, message: "不是有效链接" };
+  }
+
+  try {
+    const requestedUrl = canonicalRecordWebUrl(target) || target;
+    if (/instagram\.com|instagr\.am/i.test(requestedUrl) && apifyToken) {
+      const apify = await fetchApifyInstagram(requestedUrl).catch((error) => ({ ok: false, message: error.message || String(error) }));
+      if (apify.ok) return apify;
+    }
+    const page = await fetchPage(requestedUrl);
+    const finalUrl = page.finalUrl || requestedUrl;
+    const instagramJson = await fetchInstagramProfileJson(requestedUrl, finalUrl);
+    if (page.status >= 400) {
+      if (instagramJson.name || instagramJson.followers || instagramJson.engagement) {
+        return {
+          ok: true,
+          finalUrl,
+          profileUrl: instagramJson.profileUrl || finalUrl,
+          postUrl: "",
+          platform: instagramJson.platform || "Instagram",
+          handle: instagramJson.handle || "",
+          name: instagramJson.name || "",
+          followers: instagramJson.followers || "",
+          engagement: instagramJson.engagement || "",
+          following: instagramJson.following || "",
+          postCount: instagramJson.postCount || "",
+          postLikes: "",
+          postCollects: "",
+          postComments: "",
+          postShares: "",
+          postMetricsText: "",
+          redId: "",
+          description: instagramJson.description || "",
+          postTitle: "",
+          publishedAt: "",
+          sourceTitle: ""
+        };
+      }
+      return {
+        ok: false,
+        finalUrl,
+        status: page.status,
+        message: `网页打开失败：HTTP ${page.status}。这个链接可能过期、不完整，或平台没有给公开页面。`
+      };
+    }
+    const html = page.html;
+    const meta = collectMeta(html);
+    const ssr = parseXhsSsr(html);
+    const xhsPost = parseXhsPost(html, meta, finalUrl);
+    const instagram = parseInstagramMeta(meta, html, finalUrl);
+    const isXhs = /xiaohongshu\.com|xhslink\.com/i.test(finalUrl);
+    const isInstagramPost = /instagram\.com|instagr\.am/i.test(finalUrl) && /\/(?:p|reel|reels)\//i.test(finalUrl);
+    const publishedAt = instagram.publishedAt || xhsPost.publishedAt || (isXhs ? "" : parsePublishedAt(html, meta));
+    const combined = [meta.title, meta.description, meta.ogTitle, meta.ogDescription, stripTags(html).slice(0, 3000)].filter(Boolean).join("\n");
+    const parsed = parseSharedText(combined, finalUrl);
+    const titleName = cleanXhsTitle(meta.title || meta.ogTitle || "");
+    const requestedProfileUrl = canonicalRecordCreatorUrl(requestedUrl);
+    const resolvedProfileUrl = canonicalRecordCreatorUrl(
+      instagramJson.profileUrl || instagram.profileUrl || xhsPost.profileUrl || (isInstagramPost ? "" : parsed.profileUrl) || ""
+    );
+
+    return {
+      ok: true,
+      finalUrl,
+      profileUrl: resolvedProfileUrl || requestedProfileUrl,
+      postUrl: instagram.postUrl || xhsPost.postUrl || parsed.postUrl || "",
+      platform: instagramJson.platform || instagram.platform || parsed.platform,
+      handle: instagramJson.handle || instagram.handle || xhsPost.handle || (isInstagramPost ? "" : parsed.handle),
+      name: instagramJson.name || instagram.name || xhsPost.name || ssr.name || parsed.name || titleName,
+      followers: instagramJson.followers || instagram.followers || ssr.followers || (parsed.followers && parsed.followers !== "1" ? parsed.followers : ""),
+      engagement: instagramJson.engagement || instagram.engagement || ssr.engagement || parsed.engagement,
+      following: instagramJson.following || instagram.following || "",
+      postCount: instagramJson.postCount || instagram.postCount || "",
+      postLikes: xhsPost.postLikes || instagram.postLikes || "",
+      postCollects: xhsPost.postCollects || "",
+      postComments: xhsPost.postComments || instagram.postComments || "",
+      postShares: xhsPost.postShares || "",
+      postMetricsText: xhsPost.postMetricsText || instagram.postMetricsText || "",
+      redId: ssr.redId || "",
+      description: instagramJson.description || instagram.description || xhsPost.description || ssr.description || "",
+      postTitle: instagram.postTitle || xhsPost.postTitle || parsed.postTitle,
+      publishedAt,
+      sourceTitle: meta.title || meta.ogTitle || ""
+    };
+  } catch (error) {
+    return { ok: false, message: `打开网页失败：${error.message || error}` };
+  }
+}
+
+async function fetchPage(target) {
+  if (/instagram\.com|instagr\.am/i.test(target)) {
+    return fetchPageWithCurl(target, { minimal: true });
+  }
+  if (/xiaohongshu\.com|xhslink\.com/i.test(target)) {
+    return fetchPageWithCurl(target);
+  }
+
+  try {
+    const response = await fetch(target, {
+      redirect: "follow",
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36",
+        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8"
+      }
+    });
+    return {
+      status: response.status,
+      finalUrl: response.url || target,
+      html: await response.text()
+    };
+  } catch {
+    return fetchPageWithCurl(target);
+  }
+}
+
+async function fetchPageWithCurl(target, options = {}) {
+  const args = [
+    "-L",
+    "-sS",
+    "--max-time",
+    "15",
+  ];
+  if (!options.minimal) {
+    args.push(
+      "-A",
+      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36",
+      "-H",
+      "Accept-Language: zh-CN,zh;q=0.9,en;q=0.8"
+    );
+  }
+  args.push("-w", "\n__FINAL_URL__%{url_effective}\n__HTTP_CODE__%{http_code}", target);
+  const { stdout } = await runFile("curl", args, { maxBuffer: 4 * 1024 * 1024 });
+  const finalUrl = stdout.match(/\n__FINAL_URL__(.*)\n__HTTP_CODE__/)?.[1]?.trim() || target;
+  const status = Number(stdout.match(/\n__HTTP_CODE__(\d+)/)?.[1] || 0);
+  const html = stdout.replace(/\n__FINAL_URL__.*\n__HTTP_CODE__\d+\s*$/s, "");
+  return { status, finalUrl, html };
+}
+
+async function fetchApifyInstagram(target) {
+  const actorId = apifyInstagramActor.replace("/", "~");
+  const endpoint = `https://api.apify.com/v2/acts/${encodeURIComponent(actorId)}/run-sync-get-dataset-items?token=${encodeURIComponent(apifyToken)}`;
+  const input = {
+    directUrls: [target],
+    resultsType: /\/(?:p|reel|reels)\//i.test(target) ? "posts" : "details",
+    resultsLimit: 1
+  };
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input)
+  });
+  const items = await response.json().catch(() => []);
+  if (!response.ok) {
+    const message = Array.isArray(items) ? "" : (items?.error?.message || items?.message || "");
+    throw new Error(`Apify HTTP ${response.status}${message ? `: ${message}` : ""}`);
+  }
+  const item = Array.isArray(items) ? items[0] : items?.[0];
+  if (!item || typeof item !== "object") return { ok: false, message: "Apify 没有返回 IG 数据" };
+  return parseApifyInstagramItem(item, target);
+}
+
+function parseApifyInstagramItem(item, target) {
+  const isPost = /\/(?:p|reel|reels)\//i.test(target) || item.type || item.shortCode || item.caption;
+  const username = cleanInstagramUsername(
+    item.ownerUsername || item.owner?.username || item.username || item.inputUrl?.match(/instagram\.com\/([^/?#]+)/i)?.[1] || ""
+  );
+  const fullName = item.ownerFullName || item.owner?.fullName || item.fullName || item.name || "";
+  const profileUrl = username ? `https://www.instagram.com/${username}/` : (item.profileUrl || "");
+  const postUrl = isPost ? (item.url || item.postUrl || target) : "";
+  const followers = firstCount(item.followersCount, item.followers, item.followedByCount);
+  const following = firstCount(item.followsCount, item.followingCount, item.following);
+  const postCount = firstCount(item.postsCount, item.posts, item.mediaCount);
+  const likes = firstCount(item.likesCount, item.likeCount, item.likes);
+  const comments = firstCount(item.commentsCount, item.commentCount, item.comments);
+  const plays = firstCount(item.videoPlayCount, item.videoViewCount, item.viewsCount, item.playCount);
+  const publishedAt = normalizeApifyDate(item.timestamp || item.takenAtTimestamp || item.createdAt || item.date);
+
+  return {
+    ok: true,
+    finalUrl: item.url || target,
+    profileUrl: profileUrl || target,
+    postUrl,
+    platform: "Instagram",
+    handle: username ? `@${username}` : "",
+    name: fullName || username || "",
+    followers,
+    engagement: (postCount || following) ? `${postCount || "0"} posts · ${following || "0"} following` : "",
+    following,
+    postCount,
+    postLikes: likes,
+    postCollects: "",
+    postComments: comments,
+    postShares: "",
+    postMetricsText: [
+      likes ? `点赞 ${likes}` : "",
+      comments ? `评论 ${comments}` : "",
+      plays ? `播放 ${plays}` : ""
+    ].filter(Boolean).join(" · "),
+    redId: "",
+    description: item.biography || item.caption || item.description || "",
+    postTitle: item.caption || item.title || "",
+    publishedAt,
+    sourceTitle: "Apify Instagram Scraper",
+    source: "apify"
+  };
+}
+
+function cleanInstagramUsername(value) {
+  const raw = String(value || "").trim().replace(/^@/, "");
+  if (!raw || isInstagramReservedSegment(raw)) return "";
+  return raw;
+}
+
+function firstCount(...values) {
+  for (const value of values) {
+    if (value === 0) return "0";
+    if (value == null || value === "") continue;
+    return normalizeNumber(value, "");
+  }
+  return "";
+}
+
+function normalizeApifyDate(value) {
+  if (!value) return "";
+  if (typeof value === "number") {
+    const millis = value > 10_000_000_000 ? value : value * 1000;
+    const date = new Date(millis);
+    return Number.isNaN(date.getTime()) ? "" : date.toISOString();
+  }
+  const date = new Date(String(value));
+  return Number.isNaN(date.getTime()) ? "" : date.toISOString();
+}
+
+function collectMeta(html) {
+  const get = (pattern) => (html.match(pattern)?.[1] || "").trim();
+  return {
+    title: decodeEntities(get(/<title[^>]*>([\s\S]*?)<\/title>/i)),
+    description: decodeEntities(get(/<meta[^>]+name=["']description["'][^>]+content=["']([^"']*)["'][^>]*>/i) || get(/<meta[^>]+content=["']([^"']*)["'][^>]+name=["']description["'][^>]*>/i)),
+    ogTitle: decodeEntities(get(/<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']*)["'][^>]*>/i) || get(/<meta[^>]+content=["']([^"']*)["'][^>]+property=["']og:title["'][^>]*>/i)),
+    ogDescription: decodeEntities(get(/<meta[^>]+property=["']og:description["'][^>]+content=["']([^"']*)["'][^>]*>/i) || get(/<meta[^>]+content=["']([^"']*)["'][^>]+property=["']og:description["'][^>]*>/i)),
+    articlePublishedTime: decodeEntities(get(/<meta[^>]+property=["']article:published_time["'][^>]+content=["']([^"']*)["'][^>]*>/i) || get(/<meta[^>]+content=["']([^"']*)["'][^>]+property=["']article:published_time["'][^>]*>/i))
+  };
+}
+
+function parseSharedText(text, finalUrl) {
+  const compact = text.replace(/\s+/g, " ").trim();
+  const lower = compact.toLowerCase();
+  const source = lower + finalUrl.toLowerCase();
+  let platform = "";
+  if (/xiaohongshu|xhslink|小红书/.test(source)) platform = "小红书";
+  else if (/instagram\.com|instagr\.am|instagram/.test(source)) platform = "Instagram";
+  const handleMatch = compact.match(/@([^\s:：,，的]+)/);
+  const homeMatch = compact.match(/([^\s,，。|｜]{2,24})的个人主页/);
+  const followerMatch = compact.match(/(?:粉丝|followers?)\s*[:：]?\s*([\d,.]+)\s*([万kKmM]?)/i)
+    || compact.match(/([\d,.]+)\s*([万kKmM]?)\s*(?:粉丝|followers?)/i);
+  const followingMatch = compact.match(/([\d,.]+)\s*([万kKmM]?)\s*following/i);
+  const postsMatch = compact.match(/([\d,.]+)\s*([万kKmM]?)\s*posts?/i);
+  const engagementMatch = compact.match(/(?:获赞与收藏|赞藏|获赞|总赞|likes?)\s*[:：]?\s*([\d,.]+)\s*([万kKmM]?)/i);
+  const title = compact.split(/[-|｜]/)[0].trim().slice(0, 80);
+
+  return {
+    platform,
+    profileUrl: /\/user\/profile\//.test(finalUrl) ? finalUrl : "",
+    postUrl: /\/explore\/|\/discovery\/item|note/i.test(finalUrl) ? finalUrl : "",
+    handle: handleMatch ? `@${handleMatch[1]}` : "",
+    name: homeMatch ? homeMatch[1].replace(/^@/, "") : "",
+    followers: followerMatch ? normalizeNumber(followerMatch[1], followerMatch[2]) : "",
+    engagement: platform === "Instagram" && (postsMatch || followingMatch)
+      ? `${postsMatch ? normalizeNumber(postsMatch[1], postsMatch[2]) : "0"} posts · ${followingMatch ? normalizeNumber(followingMatch[1], followingMatch[2]) : "0"} following`
+      : (engagementMatch ? normalizeNumber(engagementMatch[1], engagementMatch[2]) : ""),
+    postTitle: title
+  };
+}
+
+function parseInstagramMeta(meta, html, finalUrl) {
+  if (!/instagram\.com|instagr\.am/i.test(finalUrl)) return {};
+  const read = (pattern) => decodeEntities((html.match(pattern)?.[1] || "").trim());
+  const title = meta.ogTitle || meta.title || read(/<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']*)["'][^>]*>/i) || read(/<title[^>]*>([\s\S]*?)<\/title>/i);
+  const description = meta.ogDescription || meta.description || read(/<meta[^>]+property=["']og:description["'][^>]+content=["']([^"']*)["'][^>]*>/i) || read(/<meta[^>]+content=["']([^"']*)["'][^>]+name=["']description["'][^>]*>/i);
+  const fallback = meta.description || description || read(/<meta[^>]+content=["']([^"']*)["'][^>]+name=["']description["'][^>]*>/i);
+  const isPost = /\/(?:p|reel|reels)\//i.test(finalUrl);
+  const titleMatch = title.match(/^(.+?)\s+\(@([^)]+)\)/);
+  const descMatch = description.match(/-\s*(.+?)\s+\(@([^)]+)\)\s+on Instagram/i);
+  const postTitleMatch = title.match(/^(.+?)\s+on Instagram\s*:/i) || description.match(/-\s*(.+?)\s+on Instagram\s*:/i);
+  const stats = readInstagramStats([description, fallback, title, stripTags(html).slice(0, 3000)].filter(Boolean));
+  const bioMatch = description.match(/on Instagram:\s*"([^"]*)"/i);
+  const rawUrlHandle = finalUrl.match(/instagram\.com\/([^/?#]+)/i)?.[1] || "";
+  const urlHandle = isInstagramReservedSegment(rawUrlHandle) ? "" : rawUrlHandle;
+  const handle = titleMatch?.[2] || descMatch?.[2] || urlHandle;
+  const following = stats.following || "";
+  const postCount = stats.postCount || "";
+  const publishedAt = parsePublishedAt(html, meta);
+  const likeMatch = description.match(/([\d,.KMkm]+)\s+likes?/i);
+  const commentMatch = description.match(/([\d,.KMkm]+)\s+comments?/i);
+  const profileUrl = handle ? `https://www.instagram.com/${handle.replace(/^@/, "")}/` : finalUrl;
+
+  return {
+    platform: "Instagram",
+    profileUrl,
+    postUrl: isPost ? finalUrl : "",
+    handle: handle ? `@${handle.replace(/^@/, "")}` : "",
+    name: decodeEntities(titleMatch?.[1] || descMatch?.[1] || postTitleMatch?.[1] || ""),
+    followers: stats.followers || "",
+    following,
+    postCount,
+    postLikes: likeMatch ? normalizeNumber(likeMatch[1], "") : "",
+    postComments: commentMatch ? normalizeNumber(commentMatch[1], "") : "",
+    postMetricsText: [
+      likeMatch ? `点赞 ${normalizeNumber(likeMatch[1], "")}` : "",
+      commentMatch ? `评论 ${normalizeNumber(commentMatch[1], "")}` : ""
+    ].filter(Boolean).join(" · "),
+    engagement: (postCount || following) ? `${postCount || "0"} posts · ${following || "0"} following` : "",
+    description: decodeEntities(bioMatch?.[1] || ""),
+    postTitle: title.replace(/\s*•\s*Instagram.*/i, "").trim(),
+    publishedAt
+  };
+}
+
+async function fetchInstagramProfileJson(target, finalUrl) {
+  const username = extractInstagramUsername(target) || extractInstagramUsername(finalUrl);
+  if (!username) return {};
+  try {
+    const apiUrl = `https://www.instagram.com/api/v1/users/web_profile_info/?username=${encodeURIComponent(username)}`;
+    const json = await fetchInstagramJson(apiUrl);
+    const user = json?.data?.user;
+    if (!user) return {};
+    const followers = user.edge_followed_by?.count;
+    const following = user.edge_follow?.count;
+    const postCount = user.edge_owner_to_timeline_media?.count;
+    return {
+      platform: "Instagram",
+      profileUrl: `https://www.instagram.com/${user.username || username}/`,
+      handle: user.username ? `@${user.username}` : `@${username}`,
+      name: user.full_name || user.username || username,
+      followers: Number.isFinite(followers) ? normalizeNumber(followers, "") : "",
+      following: Number.isFinite(following) ? normalizeNumber(following, "") : "",
+      postCount: Number.isFinite(postCount) ? normalizeNumber(postCount, "") : "",
+      engagement: `${Number.isFinite(postCount) ? normalizeNumber(postCount, "") : "0"} posts · ${Number.isFinite(following) ? normalizeNumber(following, "") : "0"} following`,
+      description: user.biography || ""
+    };
+  } catch {
+    return {};
+  }
+}
+
+async function fetchInstagramJson(apiUrl) {
+  const headers = {
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36",
+    "Accept": "application/json",
+    "x-ig-app-id": "936619743392459"
+  };
+  try {
+    const response = await fetch(apiUrl, { headers });
+    if (response.ok) return await response.json();
+  } catch {
+    // Fall through to curl. Instagram sometimes treats server fetch and curl differently.
+  }
+  const { stdout } = await runFile("curl", [
+    "-L",
+    "-sS",
+    "--max-time",
+    "15",
+    "-A",
+    headers["User-Agent"],
+    "-H",
+    `Accept: ${headers.Accept}`,
+    "-H",
+    `x-ig-app-id: ${headers["x-ig-app-id"]}`,
+    apiUrl
+  ], { maxBuffer: 4 * 1024 * 1024 });
+  return JSON.parse(stdout);
+}
+
+function extractInstagramUsername(value) {
+  const match = String(value || "").match(/instagram\.com\/([^/?#]+)/i);
+  const username = match?.[1]?.replace(/^@/, "") || "";
+  if (!username || isInstagramReservedSegment(username)) return "";
+  return decodeURIComponent(username);
+}
+
+function isInstagramReservedSegment(value) {
+  return ["accounts", "p", "reel", "reels", "explore", "stories", "tv"].includes(String(value || "").toLowerCase());
+}
+
+function readInstagramStats(sources) {
+  const sourceList = Array.isArray(sources) ? sources : [sources];
+  let compact = "";
+  const readLabel = (label) => {
+    const after = compact.match(new RegExp(`([\\d,.]+)\\s*([KkMm]?)\\s*${label}`, "i"));
+    const before = compact.match(new RegExp(`${label}\\s*[:：]?\\s*([\\d,.]+)\\s*([KkMm]?)`, "i"));
+    const match = after || before;
+    return match ? normalizeNumber(match[1], match[2]) : "";
+  };
+  for (const source of sourceList) {
+    compact = String(source || "").replace(/\s+/g, " ");
+    const stats = {
+      followers: readLabel("followers?"),
+      following: readLabel("following"),
+      postCount: readLabel("posts?")
+    };
+    if ([stats.followers, stats.following, stats.postCount].filter(Boolean).length >= 2) return stats;
+  }
+  return { followers: "", following: "", postCount: "" };
+}
+
+function parseXhsPost(html, meta, finalUrl) {
+  if (!/xiaohongshu\.com|xhslink\.com/i.test(finalUrl) || !/\/explore\/|\/discovery\/item|note/i.test(finalUrl)) return {};
+  const read = (pattern) => decodeEscaped(html.match(pattern)?.[1] || "");
+  const postTitle = cleanXhsTitle(meta.ogTitle || meta.title || "");
+  const name = read(/"user":\{[\s\S]{0,800}?"nickname":"((?:\\.|[^"])*)"/)
+    || read(/"author":\{[\s\S]{0,800}?"nickname":"((?:\\.|[^"])*)"/)
+    || read(/"nickname":"((?:\\.|[^"])*)","avatar"/)
+    || postTitle.split(/[｜|-]/)[0].trim();
+  const userId = read(/"user":\{[\s\S]{0,800}?"userId":"([^"]+)"/)
+    || read(/"author":\{[\s\S]{0,800}?"userId":"([^"]+)"/);
+  const publishedAt = parseXhsPublishedAt(html, meta);
+  const counts = parseXhsPostCounts(html);
+  return {
+    name,
+    handle: userId ? `@${userId}` : "",
+    profileUrl: userId ? `https://www.xiaohongshu.com/user/profile/${userId}` : "",
+    postUrl: finalUrl,
+    postTitle,
+    publishedAt,
+    ...counts,
+    description: meta.description || meta.ogDescription || ""
+  };
+}
+
+function parseXhsPostCounts(html) {
+  const source = decodeEntities(html);
+  const readCount = (keys) => {
+    for (const key of keys) {
+      const patterns = [
+        new RegExp(`"${key}"\\s*:\\s*"?([\\d,.万kKmM+]+)"?`, "i"),
+        new RegExp(`"${key}"\\s*:\\s*\\{[^}]*"count"\\s*:\\s*"?([\\d,.万kKmM+]+)"?`, "i")
+      ];
+      for (const pattern of patterns) {
+        const match = source.match(pattern);
+        if (match?.[1]) return normalizeSocialCount(match[1]);
+      }
+    }
+    return "";
+  };
+  const postLikes = readCount(["likedCount", "likeCount", "liked_count", "likes", "likesCount"]);
+  const postCollects = readCount(["collectedCount", "collectCount", "collected_count", "favoriteCount", "favCount", "collects"]);
+  const postComments = readCount(["commentCount", "commentsCount", "comment_count", "comments"]);
+  const postShares = readCount(["shareCount", "share_count", "shares"]);
+  return {
+    postLikes,
+    postCollects,
+    postComments,
+    postShares,
+    postMetricsText: [
+      postLikes ? `点赞 ${postLikes}` : "",
+      postCollects ? `收藏 ${postCollects}` : "",
+      postComments ? `评论 ${postComments}` : "",
+      postShares ? `转发 ${postShares}` : ""
+    ].filter(Boolean).join(" · ")
+  };
+}
+
+function parseXhsPublishedAt(html, meta = {}) {
+  const explicitTextDate = parseXhsExplicitPublishedText(html);
+  if (explicitTextDate) return explicitTextDate;
+
+  const noteTime = parseXhsNoteTime(html);
+  if (noteTime) return timestampToIso(noteTime);
+
+  const visibleDate = parseXhsVisibleDate(html);
+  if (visibleDate) return visibleDate;
+
+  const keys = [
+    "noteCreateTime",
+    "createTime",
+    "create_time",
+    "createdTime",
+    "created_at",
+    "firstPublishTime",
+    "notePublishTime",
+    "publishDateTime",
+    "publishDate",
+    "publish_time"
+  ];
+  for (const key of keys) {
+    const match = findXhsNoteTimestamp(html, key);
+    if (match) return timestampToIso(match);
+  }
+  return "";
+}
+
+function parseXhsNoteTime(html) {
+  const patterns = [
+    /"time"\s*:\s*([0-9]{10,13})\s*,\s*"lastUpdateTime"/i,
+    /"tagList"\s*:\s*\[[\s\S]{0,6000}?\]\s*,\s*"time"\s*:\s*([0-9]{10,13})\s*,\s*"shareInfo"/i,
+    /"note"\s*:\s*\{[\s\S]{0,250000}?"time"\s*:\s*([0-9]{10,13})\s*,\s*"shareInfo"/i,
+    /"noteId"\s*:\s*"[^"]+"\s*,\s*"desc"\s*:[\s\S]{0,250000}?"time"\s*:\s*([0-9]{10,13})/i
+  ];
+  for (const pattern of patterns) {
+    const match = html.match(pattern);
+    if (match?.[1]) return match[1];
+  }
+  return "";
+}
+
+function parseXhsVisibleDate(html) {
+  const source = decodeEntities(stripTags(html)).replace(/\s+/g, " ");
+  const match = source.match(/\b(\d{1,2})-(\d{1,2})\s*(?:新加坡|中国|上海|北京|广东|浙江|江苏|IP属地)?\b/);
+  if (!match) return "";
+  const serverTime = Number(html.match(/"serverTime"\s*:\s*([0-9]{10,13})/)?.[1] || "");
+  const base = Number.isFinite(serverTime) && serverTime > 0 ? new Date(serverTime) : new Date();
+  const year = base.getFullYear();
+  return datePartsToIso(year, Number(match[1]), Number(match[2]));
+}
+
+function parseXhsExplicitPublishedText(html) {
+  const source = decodeEntities(stripTags(html)).replace(/\s+/g, " ");
+  const patterns = [
+    /(?:发布于|发表于|发布时间|发布)\s*[:：]?\s*(20\d{2})[年./-]\s*(\d{1,2})[月./-]\s*(\d{1,2})(?:日)?(?:\s+(\d{1,2}):(\d{2}))?/i,
+    /(?:发布于|发表于|发布时间|发布)\s*[:：]?\s*(\d{1,2})[月./-]\s*(\d{1,2})(?:日)?(?:\s+(\d{1,2}):(\d{2}))?/i
+  ];
+  for (const pattern of patterns) {
+    const match = source.match(pattern);
+    if (!match) continue;
+    const hasYear = match[1]?.length === 4;
+    const year = hasYear ? Number(match[1]) : new Date().getFullYear();
+    const month = Number(hasYear ? match[2] : match[1]);
+    const day = Number(hasYear ? match[3] : match[2]);
+    const hour = Number(hasYear ? match[4] || 12 : match[3] || 12);
+    const minute = Number(hasYear ? match[5] || 0 : match[4] || 0);
+    const iso = datePartsToIso(year, month, day, hour, minute);
+    if (iso) return iso;
+  }
+  return "";
+}
+
+function findXhsNoteTimestamp(html, key) {
+  const pattern = new RegExp(`"${key}"\\s*:\\s*"?([0-9]{10,13})"?`, "ig");
+  let match;
+  while ((match = pattern.exec(html))) {
+    const start = Math.max(0, match.index - 900);
+    const end = Math.min(html.length, match.index + 900);
+    const context = html.slice(start, end);
+    if (/lastUpdate|updateTime|updated|editTime|edited|更新时间|编辑于|修改/i.test(context)) continue;
+    if (!/note|笔记|explore|desc|title|interact|liked|collect|comment|share/i.test(context)) continue;
+    return match[1];
+  }
+  return "";
+}
+
+function datePartsToIso(year, month, day, hour = 12, minute = 0) {
+  if (!year || !month || !day) return "";
+  const date = new Date(Date.UTC(year, month - 1, day, hour, minute));
+  if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) return "";
+  return date.toISOString();
+}
+
+function parsePublishedAt(html, meta = {}) {
+  const direct = [
+    meta.articlePublishedTime,
+    html.match(/<meta[^>]+itemprop=["']datePublished["'][^>]+content=["']([^"']+)["'][^>]*>/i)?.[1],
+    html.match(/<meta[^>]+property=["']video:release_date["'][^>]+content=["']([^"']+)["'][^>]*>/i)?.[1],
+    html.match(/<time[^>]+datetime=["']([^"']+)["'][^>]*>/i)?.[1],
+    html.match(/"datePublished"\s*:\s*"([^"]+)"/i)?.[1],
+    html.match(/"uploadDate"\s*:\s*"([^"]+)"/i)?.[1]
+  ].filter(Boolean).map(decodeEntities).find(Boolean);
+  if (direct) return direct;
+
+  const timestamp = [
+    html.match(/"taken_at_timestamp"\s*:\s*(\d{10,13})/i)?.[1],
+    html.match(/"taken_at"\s*:\s*(\d{10,13})/i)?.[1],
+    html.match(/"publishTime"\s*:\s*(\d{10,13})/i)?.[1]
+  ].find(Boolean);
+  if (!timestamp) return "";
+  return timestampToIso(timestamp);
+}
+
+function timestampToIso(timestamp) {
+  const ms = String(timestamp).length === 10 ? Number(timestamp) * 1000 : Number(timestamp);
+  return Number.isFinite(ms) ? new Date(ms).toISOString() : "";
+}
+
+function parseXhsSsr(html) {
+  const read = (pattern) => decodeEscaped(html.match(pattern)?.[1] || "");
+  const readInteraction = (label, type) => {
+    const byLabel = html.match(new RegExp(`"name":"${label}","count":"([^"]+)"`));
+    if (byLabel) return decodeEscaped(byLabel[1]);
+    const byType = html.match(new RegExp(`"count":"([^"]+)","i18nCount":"[^"]*","type":"${type}"`));
+    return byType ? decodeEscaped(byType[1]) : "";
+  };
+
+  return {
+    name: read(/"basicInfo":\{[\s\S]*?"nickname":"([^"]+)"/),
+    redId: read(/"basicInfo":\{[\s\S]*?"redId":"([^"]+)"/),
+    description: read(/"basicInfo":\{[\s\S]*?"desc":"((?:\\.|[^"])*)"/),
+    followers: readInteraction("粉丝", "fans"),
+    engagement: readInteraction("获赞与收藏", "interaction")
+  };
+}
+
+function decodeEscaped(text) {
+  if (!text) return "";
+  try {
+    return JSON.parse(`"${text.replace(/"/g, '\\"')}"`);
+  } catch {
+    return text.replace(/\\u002F/g, "/").replace(/\\n/g, "\n");
+  }
+}
+
+function cleanXhsTitle(title) {
+  return title
+    .replace(/\s*[-｜|]\s*小红书.*/i, "")
+    .replace(/\s*小红书.*/i, "")
+    .trim();
+}
+
+function normalizeNumber(value, unit) {
+  const number = Number(String(value).replace(/,/g, ""));
+  if (!Number.isFinite(number)) return `${value}${unit || ""}`;
+  if (unit === "万") return String(Math.round(number * 10000)).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  if (/k/i.test(unit)) return String(Math.round(number * 1000)).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  if (/m/i.test(unit)) return String(Math.round(number * 1000000)).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  return String(Math.round(number)).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+}
+
+function normalizeSocialCount(value) {
+  const raw = String(value || "").trim();
+  const match = raw.match(/^([\d,.]+)\s*([万kKmM+]*)$/);
+  if (!match) return raw;
+  const unit = match[2] || "";
+  if (unit.includes("+")) return `${normalizeNumber(match[1], unit.replace("+", ""))}+`;
+  return normalizeNumber(match[1], unit);
+}
+
+function stripTags(html) {
+  return decodeEntities(html.replace(/<script[\s\S]*?<\/script>/gi, " ").replace(/<style[\s\S]*?<\/style>/gi, " ").replace(/<[^>]+>/g, " "));
+}
+
+function decodeEntities(text) {
+  return text
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&#(\d+);/g, (_, code) => String.fromCodePoint(Number(code)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, code) => String.fromCodePoint(parseInt(code, 16)));
+}
+
+function sendJson(res, payload, status = 200) {
+  writeCors(res, status, { "Content-Type": "application/json; charset=utf-8" });
+  res.end(JSON.stringify(payload));
+}
+
+function writeCors(res, status, headers = {}) {
+  res.writeHead(status, {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+    "Access-Control-Allow-Headers": "Accept, Content-Type",
+    ...headers
+  });
+}
