@@ -29,6 +29,7 @@ const apifyToken = process.env.APIFY_TOKEN || "";
 const apifyInstagramActor = process.env.APIFY_IG_ACTOR || "apify/instagram-scraper";
 let dbPoolPromise;
 let dbReadyPromise;
+let recordsWriteQueue = Promise.resolve();
 
 const mime = {
   ".html": "text/html; charset=utf-8",
@@ -69,11 +70,36 @@ createServer(async (req, res) => {
     if (url.pathname === "/api/records" && req.method === "POST") {
       const body = await readJsonBody(req);
       const incomingRecords = Array.isArray(body.records) ? body.records : [];
-      const records = mergeRecords(await readRecords(), incomingRecords);
-      await writeRecords(records);
       const highlightIds = Array.isArray(body.highlightIds) ? body.highlightIds.map(String) : [];
-      const notification = body.silent ? { skipped: true, reason: "silent update" } : await queueDailyChanges(highlightIds);
-      sendJson(res, { ok: true, count: records.length, reportUrl: "/api/report.png", notification });
+      const result = await withRecordsWriteLock(async () => {
+        const existingRecords = await readRecords();
+        const existingIds = new Set(existingRecords.map((record) => String(record?.id || "")).filter(Boolean));
+        const changedIds = new Set([
+          ...highlightIds,
+          ...incomingRecords
+            .filter((record) => record?.id && !existingIds.has(String(record.id)))
+            .map((record) => String(record.id))
+        ]);
+        const records = mergeRecords(existingRecords, incomingRecords);
+        const duplicate = findChangedDuplicate(records, changedIds);
+        if (duplicate) return { duplicate };
+
+        await writeRecords(records);
+        const notification = body.silent ? { skipped: true, reason: "silent update" } : await queueDailyChanges(highlightIds);
+        return { records, notification };
+      });
+
+      if (result.duplicate) {
+        sendJson(res, {
+          ok: false,
+          error: "DUPLICATE_RECORD",
+          message: duplicateMessage(result.duplicate.record, result.duplicate.existing),
+          duplicateId: String(result.duplicate.existing.id || "")
+        }, 409);
+        return;
+      }
+
+      sendJson(res, { ok: true, count: result.records.length, reportUrl: "/api/report.png", notification: result.notification });
       return;
     }
 
@@ -379,6 +405,124 @@ function mergeRecords(existingRecords, incomingRecords) {
   return Array.from(byId.values());
 }
 
+function withRecordsWriteLock(task) {
+  const run = recordsWriteQueue.then(task, task);
+  recordsWriteQueue = run.then(() => undefined, () => undefined);
+  return run;
+}
+
+function findChangedDuplicate(records, changedIds) {
+  const list = Array.isArray(records) ? records.filter((record) => record?.id) : [];
+  const ids = changedIds instanceof Set ? changedIds : new Set(changedIds || []);
+  for (const record of list) {
+    if (!ids.has(String(record.id))) continue;
+    const keys = duplicateKeys(record);
+    if (!keys.length) continue;
+    const existing = list.find((item) => {
+      if (String(item.id) === String(record.id)) return false;
+      const otherKeys = duplicateKeys(item);
+      return otherKeys.some((key) => keys.includes(key));
+    });
+    if (existing) return { record, existing };
+  }
+  return null;
+}
+
+function duplicateKeys(record) {
+  if (!record || normalizedRecordStatus(record.status) === "取消") return [];
+  const keys = [];
+  const post = canonicalRecordUrlIdentity(canonicalRecordPostUrl(record.postUrl || ""));
+  if (post) keys.push(`post:${post}`);
+
+  const creator = creatorIdentity(record);
+  const date = normalizeRecordText(record.dateISO || record.dateText || "");
+  const time = normalizeRecordText(record.timeText || "");
+  if (creator && record.type !== "post" && date && time) {
+    keys.push(`booking:${creator}:${date}:${time}`);
+  }
+  return keys;
+}
+
+function creatorIdentity(record) {
+  const profile = canonicalRecordUrlIdentity(canonicalRecordCreatorUrl(record.link || record.profileUrl || ""));
+  if (profile) return `url:${profile}`;
+  const platform = normalizeRecordText(record.platform || "");
+  const handle = normalizeRecordText(record.handle || "").replace(/^@/, "");
+  if (platform && handle) return `handle:${platform}:${handle}`;
+  const name = normalizeRecordText(record.name || "");
+  return platform && name ? `name:${platform}:${name}` : "";
+}
+
+function canonicalRecordWebUrl(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  try {
+    const url = new URL(raw);
+    if (!["http:", "https:"].includes(url.protocol) || !url.hostname) return "";
+    [
+      "appuid", "apptime", "share_id", "wechatWid", "wechatOrigin",
+      "xhsshare", "appshare", "shareRedId", "source"
+    ].forEach((key) => url.searchParams.delete(key));
+    url.hash = "";
+    return url.href;
+  } catch {
+    return "";
+  }
+}
+
+function canonicalRecordCreatorUrl(value) {
+  const safe = canonicalRecordWebUrl(value);
+  if (!safe) return "";
+  const url = new URL(safe);
+  const host = url.hostname.replace(/^www\./, "").toLowerCase();
+  const path = url.pathname.replace(/\/+$/, "");
+  if (/xiaohongshu\.com$/.test(host) && /^\/user\/profile\/[^/]+$/i.test(path)) return safe;
+  if (/instagram\.com$/.test(host)) {
+    const segment = path.split("/").filter(Boolean)[0] || "";
+    if (segment && !["p", "reel", "reels", "explore", "accounts", "direct", "stories", "share"].includes(segment.toLowerCase())) {
+      return safe;
+    }
+  }
+  if (/tiktok\.com$/.test(host) && /^\/@[^/]+$/i.test(path)) return safe;
+  if (/facebook\.com$/.test(host) && path && !/^\/(?:share|watch|reel|photo)/i.test(path)) return safe;
+  return "";
+}
+
+function canonicalRecordPostUrl(value) {
+  const safe = canonicalRecordWebUrl(value);
+  if (!safe) return "";
+  const url = new URL(safe);
+  const host = url.hostname.replace(/^www\./, "").toLowerCase();
+  const path = url.pathname.replace(/\/+$/, "");
+  if (/xiaohongshu\.com$/.test(host) && /^\/(?:explore|discovery\/item)\/[^/]+$/i.test(path)) return safe;
+  if (/xhslink\.com$/.test(host) && path) return safe;
+  if (/instagram\.com$/.test(host) && /^\/(?:p|reel|reels)\/[^/]+$/i.test(path)) return safe;
+  if (/tiktok\.com$/.test(host) && /\/video\/[^/]+$/i.test(path)) return safe;
+  return "";
+}
+
+function canonicalRecordUrlIdentity(value) {
+  if (!value) return "";
+  const url = new URL(value);
+  return `${url.hostname.replace(/^www\./, "").toLowerCase()}${url.pathname.replace(/\/+$/, "").toLowerCase()}`;
+}
+
+function normalizeRecordText(value) {
+  return String(value || "").trim().toLowerCase().replace(/\s+/g, "");
+}
+
+function normalizedRecordStatus(status) {
+  if (status === "已发布") return "已发布";
+  if (status === "取消") return "取消";
+  return "新增";
+}
+
+function duplicateMessage(record, existing) {
+  const creator = existing?.name || existing?.handle || record?.name || record?.handle || "这位博主";
+  const schedule = [existing?.dateText || existing?.dateISO, existing?.timeText].filter(Boolean).join(" ");
+  return `重复提醒：${creator}${schedule ? ` · ${schedule}` : ""} 的相同记录已经存在，本次没有重复保存。`;
+}
+
 async function generateReportPng(records, highlightIds = []) {
   await mkdir(outputDir, { recursive: true });
   const reportRecordsPath = await writeReportRecordsSnapshot(records, "report-records-png.json");
@@ -572,13 +716,14 @@ async function resolveProfile(target) {
   }
 
   try {
-    if (/instagram\.com|instagr\.am/i.test(target) && apifyToken) {
-      const apify = await fetchApifyInstagram(target).catch((error) => ({ ok: false, message: error.message || String(error) }));
+    const requestedUrl = canonicalRecordWebUrl(target) || target;
+    if (/instagram\.com|instagr\.am/i.test(requestedUrl) && apifyToken) {
+      const apify = await fetchApifyInstagram(requestedUrl).catch((error) => ({ ok: false, message: error.message || String(error) }));
       if (apify.ok) return apify;
     }
-    const page = await fetchPage(target);
-    const finalUrl = page.finalUrl || target;
-    const instagramJson = await fetchInstagramProfileJson(target, finalUrl);
+    const page = await fetchPage(requestedUrl);
+    const finalUrl = page.finalUrl || requestedUrl;
+    const instagramJson = await fetchInstagramProfileJson(requestedUrl, finalUrl);
     if (page.status >= 400) {
       if (instagramJson.name || instagramJson.followers || instagramJson.engagement) {
         return {
@@ -623,11 +768,15 @@ async function resolveProfile(target) {
     const combined = [meta.title, meta.description, meta.ogTitle, meta.ogDescription, stripTags(html).slice(0, 3000)].filter(Boolean).join("\n");
     const parsed = parseSharedText(combined, finalUrl);
     const titleName = cleanXhsTitle(meta.title || meta.ogTitle || "");
+    const requestedProfileUrl = canonicalRecordCreatorUrl(requestedUrl);
+    const resolvedProfileUrl = canonicalRecordCreatorUrl(
+      instagramJson.profileUrl || instagram.profileUrl || xhsPost.profileUrl || (isInstagramPost ? "" : parsed.profileUrl) || ""
+    );
 
     return {
       ok: true,
       finalUrl,
-      profileUrl: instagramJson.profileUrl || instagram.profileUrl || xhsPost.profileUrl || (isInstagramPost ? "" : parsed.profileUrl) || finalUrl,
+      profileUrl: resolvedProfileUrl || requestedProfileUrl,
       postUrl: instagram.postUrl || xhsPost.postUrl || parsed.postUrl || "",
       platform: instagramJson.platform || instagram.platform || parsed.platform,
       handle: instagramJson.handle || instagram.handle || xhsPost.handle || (isInstagramPost ? "" : parsed.handle),
@@ -1212,8 +1361,8 @@ function decodeEntities(text) {
     .replace(/&#x([0-9a-f]+);/gi, (_, code) => String.fromCodePoint(parseInt(code, 16)));
 }
 
-function sendJson(res, payload) {
-  writeCors(res, 200, { "Content-Type": "application/json; charset=utf-8" });
+function sendJson(res, payload, status = 200) {
+  writeCors(res, status, { "Content-Type": "application/json; charset=utf-8" });
   res.end(JSON.stringify(payload));
 }
 

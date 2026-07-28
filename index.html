@@ -859,7 +859,17 @@
             feeAmount: draft.feeAmount || existing.feeAmount || ""
           }
         : draft;
+      const earlyDuplicate = findDuplicateRecord(record, state.records, state.editingId);
+      if (earlyDuplicate) {
+        blockDuplicateSubmission(record, earlyDuplicate);
+        return;
+      }
       const enriched = await enrichRecord(record);
+      const duplicate = findDuplicateRecord(enriched, state.records, state.editingId);
+      if (duplicate) {
+        blockDuplicateSubmission(enriched, duplicate);
+        return;
+      }
       if (!state.editingId && enriched.type === "post" && enriched.ok !== false) {
         const matched = await findMatchingBooking(enriched);
         if (!matched) {
@@ -897,7 +907,7 @@
     statusFilter.addEventListener("change", render);
     visitType.addEventListener("change", syncVisitTypeFields);
 
-    reviewPanel.addEventListener("click", (event) => {
+    reviewPanel.addEventListener("click", async (event) => {
       const action = event.target.closest("[data-review-action]")?.dataset.reviewAction;
       if (!action) return;
       if (action === "back") {
@@ -926,13 +936,27 @@
           ? { ...state.pendingRecord, id: editingId, createdAt: new Date().toISOString(), highlightUntil: Date.now() + 72 * 60 * 60 * 1000 }
           : { ...state.pendingRecord, id: String(Date.now()), createdAt: new Date().toISOString(), highlightUntil: Date.now() + 72 * 60 * 60 * 1000 };
         record.status = record.postUrl || record.type === "post" ? "已发布" : normalizeStatus(record.status);
+        const duplicate = findDuplicateRecord(record, state.records, editingId);
+        if (duplicate) {
+          blockDuplicateSubmission(record, duplicate);
+          return;
+        }
+        const previousRecords = state.records;
         if (editingId) {
           state.records = state.records.map((item) => item.id === editingId ? record : item);
         } else {
           state.records.unshift(record);
         }
+        const saveResult = await saveRecords({ highlightIds: [record.id] });
+        if (saveResult?.duplicate) {
+          state.records = previousRecords;
+          localStorage.setItem(KEY, JSON.stringify(state.records));
+          const serverDuplicate = state.records.find((item) => String(item.id) === String(saveResult.duplicateId || ""));
+          blockDuplicateSubmission(record, serverDuplicate, saveResult.message);
+          render();
+          return;
+        }
         state.pendingRecord = null;
-        saveRecords({ highlightIds: [record.id] });
         resetForm();
         const savedLabel = record.status === "已发布" ? "已更新为已发布" : (editingId ? "已更新" : "已保存");
         statusLine.textContent = `${record.dateISO ? savedLabel : `注意：日期未识别，${savedLabel}`}：${record.dateText || "未填日期"} ${record.timeText || "未填时间"} ${displayCreatorName(record)}`;
@@ -1204,8 +1228,10 @@
       const merged = {
         ...record,
         platform: resolved.platform || record.platform,
-        link: resolved.profileUrl || resolved.finalUrl || record.link,
-        postUrl: record.type === "post" ? resolved.postUrl || resolved.finalUrl || record.postUrl || record.link : record.postUrl,
+        link: canonicalCreatorProfileUrl(resolved.profileUrl) || canonicalWebUrl(record.link),
+        postUrl: record.type === "post"
+          ? canonicalPostUrl(resolved.postUrl || resolved.finalUrl) || canonicalPostUrl(record.postUrl || record.link)
+          : record.postUrl,
         handle: record.handle || resolved.handle || "",
         name: record.name || resolved.name || "",
         followers: record.followers || resolved.followers || "",
@@ -1220,7 +1246,9 @@
         postShares: resolved.postShares || record.postShares || "",
         postMetricsText: resolved.postMetricsText || record.postMetricsText || "",
         resolveStatus: "已自动识别",
-        resolveMessage: "已打开链接并自动识别信息，请确认后保存"
+        resolveMessage: resolved.name || resolved.handle
+          ? "已打开链接并自动识别信息，请确认后保存"
+          : "主页链接已保留，但平台没有公开返回博主名字；请手动填写名字后保存"
       };
       return merged;
     }
@@ -1323,7 +1351,8 @@
     function parseProfile(text) {
       const raw = text.trim();
       const compact = raw.replace(/\s+/g, " ");
-      const link = (raw.match(/https?:\/\/\S+/i) || [""])[0].replace(/[，,。)）]+$/g, "");
+      const detectedLink = (raw.match(/https?:\/\/\S+/i) || [""])[0].replace(/[，,。)）]+$/g, "");
+      const link = canonicalWebUrl(detectedLink);
       const lower = raw.toLowerCase();
       let platform = "";
       if (/小红书|xiaohongshu|xhs|rednote|xhslink/.test(lower) || /xiaohongshu|xhslink/.test(link)) platform = "小红书";
@@ -1591,26 +1620,83 @@
       return "新增";
     }
 
-    function duplicateKey(record) {
-      if (!record || normalizeStatus(record.status) === "取消") return "";
-      const profile = normalizeProfileUrl(record.link || record.profileUrl || "");
+    function duplicateKeys(record) {
+      if (!record || normalizeStatus(record.status) === "取消") return [];
+      const keys = [];
+      const post = canonicalUrlIdentity(canonicalPostUrl(record.postUrl || ""));
+      if (post) keys.push(`post:${post}`);
+
+      const creator = creatorDuplicateIdentity(record);
+      const date = normalizeLooseText(record.dateISO || record.dateText || "");
+      const time = normalizeLooseText(record.timeText || "");
+      if (creator && record.type !== "post" && date && time) {
+        keys.push(`booking:${creator}:${date}:${time}`);
+      }
+      return keys;
+    }
+
+    function creatorDuplicateIdentity(record) {
+      const profile = canonicalUrlIdentity(canonicalCreatorProfileUrl(record.link || record.profileUrl || ""));
       if (profile) return `url:${profile}`;
       const platform = normalizeLooseText(record.platform || "");
-      const handle = normalizeLooseText(record.handle || "");
-      if (platform && handle) return `handle:${platform}:${handle.replace(/^@/, "")}`;
+      const handle = normalizeLooseText(record.handle || "").replace(/^@/, "");
+      if (platform && handle) return `handle:${platform}:${handle}`;
       const name = normalizeLooseText(record.name || "");
       return platform && name ? `name:${platform}:${name}` : "";
     }
 
-    function normalizeProfileUrl(value) {
+    function canonicalWebUrl(value) {
       const raw = String(value || "").trim();
       if (!raw) return "";
       try {
         const url = new URL(raw);
-        return `${url.hostname.replace(/^www\./, "").toLowerCase()}${url.pathname.replace(/\/+$/, "").toLowerCase()}`;
+        if (!["http:", "https:"].includes(url.protocol) || !url.hostname) return "";
+        [
+          "appuid", "apptime", "share_id", "wechatWid", "wechatOrigin",
+          "xhsshare", "appshare", "shareRedId", "source"
+        ].forEach((key) => url.searchParams.delete(key));
+        url.hash = "";
+        return url.href;
       } catch {
-        return normalizeLooseText(raw.split(/[?#]/)[0]);
+        return "";
       }
+    }
+
+    function canonicalCreatorProfileUrl(value) {
+      const safe = canonicalWebUrl(value);
+      if (!safe) return "";
+      const url = new URL(safe);
+      const host = url.hostname.replace(/^www\./, "").toLowerCase();
+      const path = url.pathname.replace(/\/+$/, "");
+      if (/xiaohongshu\.com$/.test(host) && /^\/user\/profile\/[^/]+$/i.test(path)) return safe;
+      if (/instagram\.com$/.test(host)) {
+        const segment = path.split("/").filter(Boolean)[0] || "";
+        if (segment && !["p", "reel", "reels", "explore", "accounts", "direct", "stories", "share"].includes(segment.toLowerCase())) {
+          return safe;
+        }
+      }
+      if (/tiktok\.com$/.test(host) && /^\/@[^/]+$/i.test(path)) return safe;
+      if (/facebook\.com$/.test(host) && path && !/^\/(?:share|watch|reel|photo)/i.test(path)) return safe;
+      return "";
+    }
+
+    function canonicalPostUrl(value) {
+      const safe = canonicalWebUrl(value);
+      if (!safe) return "";
+      const url = new URL(safe);
+      const host = url.hostname.replace(/^www\./, "").toLowerCase();
+      const path = url.pathname.replace(/\/+$/, "");
+      if (/xiaohongshu\.com$/.test(host) && /^\/(?:explore|discovery\/item)\/[^/]+$/i.test(path)) return safe;
+      if (/xhslink\.com$/.test(host) && path) return safe;
+      if (/instagram\.com$/.test(host) && /^\/(?:p|reel|reels)\/[^/]+$/i.test(path)) return safe;
+      if (/tiktok\.com$/.test(host) && /\/video\/[^/]+$/i.test(path)) return safe;
+      return "";
+    }
+
+    function canonicalUrlIdentity(value) {
+      if (!value) return "";
+      const url = new URL(value);
+      return `${url.hostname.replace(/^www\./, "").toLowerCase()}${url.pathname.replace(/\/+$/, "").toLowerCase()}`;
     }
 
     function normalizeLooseText(value) {
@@ -1618,9 +1704,19 @@
     }
 
     function isDuplicateRecord(record, records = state.records) {
-      const key = duplicateKey(record);
-      if (!key) return false;
-      return records.filter((item) => duplicateKey(item) === key).length > 1;
+      return Boolean(findDuplicateRecord(record, records));
+    }
+
+    function findDuplicateRecord(record, records = state.records, ignoreId = "") {
+      const keys = duplicateKeys(record);
+      if (!keys.length) return null;
+      const selfId = String(ignoreId || record?.id || "");
+      return (records || []).find((item) => {
+        if (!item) return false;
+        if (selfId && String(item.id || "") === selfId) return false;
+        const otherKeys = duplicateKeys(item);
+        return otherKeys.some((key) => keys.includes(key));
+      }) || null;
     }
 
     function recordsWithCandidate(record) {
@@ -1628,6 +1724,20 @@
       return exists
         ? state.records.map((item) => item.id === record.id ? record : item)
         : state.records.concat(record);
+    }
+
+    function blockDuplicateSubmission(record, existing, serverMessage = "") {
+      state.pendingRecord = null;
+      state.pendingPostRecord = null;
+      const creator = existing ? displayCreatorName(existing) : displayCreatorName(record);
+      const schedule = existing
+        ? [existing.dateText || existing.dateISO, existing.timeText].filter(Boolean).join(" ")
+        : [record.dateText || record.dateISO, record.timeText].filter(Boolean).join(" ");
+      const message = serverMessage || `重复提醒：${creator}${schedule ? ` · ${schedule}` : ""} 的相同记录已经存在，本次没有重复保存。`;
+      statusLine.textContent = message;
+      reviewPanel.classList.add("hidden");
+      showToast("重复信息，未保存");
+      if (existing?.id) scrollToRecord(existing.id);
     }
 
     function renderLinkButtons(record) {
@@ -1638,7 +1748,9 @@
     }
 
     function renderLinkButton(label, url) {
-      return `<a class="link-pill" href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(label)}</a>`;
+      const safeUrl = canonicalWebUrl(url);
+      if (!safeUrl) return "";
+      return `<a class="link-pill" href="${escapeHtml(safeUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(label)}</a>`;
     }
 
     function getFilteredRecords() {
@@ -1975,9 +2087,9 @@
 
     async function saveRecords(options = {}) {
       localStorage.setItem(KEY, JSON.stringify(state.records));
-      if (new URLSearchParams(window.location.search).get("demo") === "1") return;
+      if (new URLSearchParams(window.location.search).get("demo") === "1") return { ok: true, storage: "demo" };
       try {
-        await fetch(apiEndpoint("/api/records"), {
+        const response = await fetch(apiEndpoint("/api/records"), {
           method: "POST",
           headers: { "Content-Type": "application/json", "Accept": "application/json" },
           body: JSON.stringify({
@@ -1986,8 +2098,22 @@
             highlightIds: options.highlightIds || []
           })
         });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          if (response.status === 409 || data.error === "DUPLICATE_RECORD") {
+            return {
+              ok: false,
+              duplicate: true,
+              duplicateId: data.duplicateId || "",
+              message: data.message || "重复信息，本次没有保存。"
+            };
+          }
+          throw new Error(data.message || `HTTP ${response.status}`);
+        }
+        return { ok: true, data };
       } catch {
         // Local storage remains the fallback when the backend is offline.
+        return { ok: true, storage: "local" };
       }
     }
 
