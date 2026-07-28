@@ -1649,8 +1649,17 @@
       const raw = String(value || "").trim();
       if (!raw) return "";
       try {
-        const url = new URL(raw);
+        let url = new URL(raw);
         if (!["http:", "https:"].includes(url.protocol) || !url.hostname) return "";
+        const host = url.hostname.replace(/^www\./, "").toLowerCase();
+        const redirectPath = url.searchParams.get("redirectPath") || "";
+        if (/xiaohongshu\.com$/.test(host) && /^\/login\/?$/i.test(url.pathname) && redirectPath) {
+          const nested = new URL(redirectPath);
+          const nestedHost = nested.hostname.replace(/^www\./, "").toLowerCase();
+          if (["http:", "https:"].includes(nested.protocol) && /xiaohongshu\.com$/.test(nestedHost)) {
+            url = nested;
+          }
+        }
         [
           "appuid", "apptime", "share_id", "wechatWid", "wechatOrigin",
           "xhsshare", "appshare", "shareRedId", "source"
