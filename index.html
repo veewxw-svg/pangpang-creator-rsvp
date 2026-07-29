@@ -1238,8 +1238,8 @@
         engagement: record.engagement || resolved.engagement || "",
         bio: record.bio || resolved.description || "",
         postTitle: record.postTitle || resolved.postTitle || "",
-        postPublishedAt: resolved.publishedAt || (isXhsLink(record.postUrl || record.link) ? "" : record.postPublishedAt || ""),
-        postDateText: resolved.publishedAt ? formatChineseDate(resolved.publishedAt) : (isXhsLink(record.postUrl || record.link) ? "" : record.postDateText || ""),
+        postPublishedAt: resolved.publishedAt || record.postPublishedAt || "",
+        postDateText: resolved.publishedAt ? formatChineseDate(resolved.publishedAt) : record.postDateText || "",
         postLikes: resolved.postLikes || record.postLikes || "",
         postCollects: resolved.postCollects || record.postCollects || "",
         postComments: resolved.postComments || record.postComments || "",
@@ -1323,8 +1323,8 @@
           postComments: resolved.postComments || record.postComments || "",
           postShares: resolved.postShares || record.postShares || "",
           postMetricsText: resolved.postMetricsText || record.postMetricsText || "",
-          postPublishedAt: resolved.publishedAt || (isXhsLink(record.postUrl || record.link) ? "" : record.postPublishedAt || ""),
-          postDateText: resolved.publishedAt ? formatChineseDate(resolved.publishedAt) : (isXhsLink(record.postUrl || record.link) ? "" : record.postDateText || "")
+          postPublishedAt: resolved.publishedAt || record.postPublishedAt || "",
+          postDateText: resolved.publishedAt ? formatChineseDate(resolved.publishedAt) : record.postDateText || ""
         };
         Object.entries(updates).forEach(([key, value]) => {
           const canClear = key === "postPublishedAt" || key === "postDateText";

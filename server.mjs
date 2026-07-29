@@ -821,17 +821,52 @@ async function fetchPage(target) {
       cookies: true,
       referer: "https://www.xiaohongshu.com/"
     });
-    if (xhsPageScore(primary) >= 3) return primary;
+    const primaryScore = xhsPageScore(primary);
+    if (primaryScore >= 3 && xhsPageHasReliablePostDate(primary)) return primary;
 
     const fallbackTarget = canonicalRecordWebUrl(primary.finalUrl) || target;
-    const mobile = await fetchPageWithCurl(fallbackTarget, {
-      compressed: true,
-      cookies: true,
-      maxTime: 10,
-      referer: "https://www.xiaohongshu.com/",
-      userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.5 Mobile/15E148 Safari/604.1"
-    }).catch(() => null);
-    return mobile && xhsPageScore(mobile) > xhsPageScore(primary) ? mobile : primary;
+    let best = primary;
+    const attempts = [
+      {
+        target: fallbackTarget,
+        options: {
+          compressed: true,
+          cookies: true,
+          maxTime: 8,
+          noCache: true,
+          referer: "https://www.xiaohongshu.com/",
+          userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.5 Mobile/15E148 Safari/604.1"
+        }
+      },
+      {
+        target: fallbackTarget,
+        options: {
+          compressed: true,
+          cookies: true,
+          maxTime: 8,
+          noCache: true,
+          referer: "https://www.xiaohongshu.com/"
+        }
+      },
+      {
+        target,
+        options: {
+          compressed: true,
+          cookies: true,
+          maxTime: 8,
+          noCache: true,
+          referer: "https://www.xiaohongshu.com/",
+          userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.5 Mobile/15E148 Safari/604.1"
+        }
+      }
+    ];
+    for (const attempt of attempts) {
+      const page = await fetchPageWithCurl(attempt.target, attempt.options).catch(() => null);
+      if (!page) continue;
+      if (xhsPageScore(page) > xhsPageScore(best)) best = page;
+      if (xhsPageHasReliablePostDate(page)) return page;
+    }
+    return best;
   }
 
   try {
@@ -862,6 +897,7 @@ async function fetchPageWithCurl(target, options = {}) {
   ];
   if (options.compressed) args.push("--compressed");
   if (options.cookies) args.push("-b", "");
+  if (options.noCache) args.push("-H", "Cache-Control: no-cache", "-H", "Pragma: no-cache");
   if (!options.minimal) {
     args.push(
       "-A",
@@ -894,8 +930,19 @@ function xhsPageScore(page) {
   if (ssr.name || post.name) score += 4;
   else if (titleName && !/^(?:小红书|登录|注册|发现|red|rednote)$/i.test(titleName)) score += 3;
   if (ssr.followers || ssr.engagement) score += 2;
+  if (post.publishedAt && xhsPageHasReliablePostDate(page)) score += 2;
   if (/"basicInfo"\s*:|"nickname"\s*:|"userId"\s*:/i.test(page.html)) score += 1;
   return score;
+}
+
+function xhsPageHasReliablePostDate(page) {
+  if (!page?.html) return false;
+  const finalUrl = page.finalUrl || "";
+  if (!canonicalRecordPostUrl(finalUrl)) return true;
+  if (parseXhsExplicitPublishedText(page.html) || parseXhsVisibleDate(page.html)) return true;
+  const noteId = decodeURIComponent(finalUrl.match(/\/(?:explore|discovery\/item)\/([^/?#]+)/i)?.[1] || "");
+  const targetTimes = parseXhsTargetTimes(page.html, noteId);
+  return Boolean(targetTimes.published || targetTimes.updated);
 }
 
 async function fetchApifyInstagram(target) {
@@ -1175,7 +1222,8 @@ function parseXhsPost(html, meta, finalUrl) {
     || postTitle.split(/[｜|-]/)[0].trim();
   const userId = read(/"user":\{[\s\S]{0,800}?"userId":"([^"]+)"/)
     || read(/"author":\{[\s\S]{0,800}?"userId":"([^"]+)"/);
-  const publishedAt = parseXhsPublishedAt(html, meta);
+    const noteId = decodeURIComponent(finalUrl.match(/\/(?:explore|discovery\/item)\/([^/?#]+)/i)?.[1] || "");
+    const publishedAt = parseXhsPublishedAt(html, meta, noteId);
   const counts = parseXhsPostCounts(html);
   return {
     name,
@@ -1222,33 +1270,53 @@ function parseXhsPostCounts(html) {
   };
 }
 
-function parseXhsPublishedAt(html, meta = {}) {
+function parseXhsPublishedAt(html, meta = {}, noteId = "") {
   const explicitTextDate = parseXhsExplicitPublishedText(html);
   if (explicitTextDate) return explicitTextDate;
 
-  const noteTime = parseXhsNoteTime(html);
-  if (noteTime) return timestampToIso(noteTime);
+  const targetTimes = parseXhsTargetTimes(html, noteId);
+  if (targetTimes.published) return timestampToIso(targetTimes.published);
+  if (targetTimes.updated) return timestampToIso(targetTimes.updated);
 
   const visibleDate = parseXhsVisibleDate(html);
   if (visibleDate) return visibleDate;
 
-  const keys = [
-    "noteCreateTime",
-    "createTime",
-    "create_time",
-    "createdTime",
-    "created_at",
+  return "";
+}
+
+function parseXhsTargetTimes(html, noteId) {
+  if (!noteId) return { published: "", created: "", updated: "" };
+  const marker = `"noteId":"${noteId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"`;
+  const index = html.search(new RegExp(marker, "i"));
+  if (index < 0) {
+    const uniqueUpdated = [...new Set([...html.matchAll(/"lastUpdateTime"\s*:\s*"?([0-9]{10,13})"?/ig)].map((match) => match[1]))];
+    const uniqueCreated = [...new Set([...html.matchAll(/"time"\s*:\s*"?([0-9]{10,13})"?/ig)].map((match) => match[1]))];
+    return {
+      published: "",
+      updated: uniqueUpdated.length === 1 ? uniqueUpdated[0] : "",
+      created: uniqueCreated.length === 1 ? uniqueCreated[0] : ""
+    };
+  }
+
+  const before = html.slice(Math.max(0, index - 6000), index + marker.length);
+  const after = html.slice(index, Math.min(html.length, index + 30000));
+  const scope = `${before}${after}`;
+  const publicationKeys = [
     "firstPublishTime",
     "notePublishTime",
     "publishDateTime",
     "publishDate",
     "publish_time"
   ];
-  for (const key of keys) {
-    const match = findXhsNoteTimestamp(html, key);
-    if (match) return timestampToIso(match);
+  let published = "";
+  for (const key of publicationKeys) {
+    published = scope.match(new RegExp(`"${key}"\\s*:\\s*"?([0-9]{10,13})"?`, "i"))?.[1] || "";
+    if (published) break;
   }
-  return "";
+  const updatedMatches = [...before.matchAll(/"lastUpdateTime"\s*:\s*"?([0-9]{10,13})"?/ig)];
+  const updated = updatedMatches.at(-1)?.[1] || "";
+  const created = after.match(/"time"\s*:\s*"?([0-9]{10,13})"?/i)?.[1] || "";
+  return { published, created, updated };
 }
 
 function parseXhsNoteTime(html) {
@@ -1267,7 +1335,8 @@ function parseXhsNoteTime(html) {
 
 function parseXhsVisibleDate(html) {
   const source = decodeEntities(stripTags(html)).replace(/\s+/g, " ");
-  const match = source.match(/\b(\d{1,2})-(\d{1,2})\s*(?:新加坡|中国|上海|北京|广东|浙江|江苏|IP属地)?\b/);
+  const match = source.match(/(?:发布于|发表于|发布时间|发布)\s*[:：]?\s*(\d{1,2})-(\d{1,2})/i)
+    || source.match(/(?:^|[\s·|｜])(\d{1,2})-(\d{1,2})\s+(?:新加坡|中国|上海|北京|广东|浙江|江苏|IP属地)(?=\s|$)/i);
   if (!match) return "";
   const serverTime = Number(html.match(/"serverTime"\s*:\s*([0-9]{10,13})/)?.[1] || "");
   const base = Number.isFinite(serverTime) && serverTime > 0 ? new Date(serverTime) : new Date();
