@@ -452,41 +452,50 @@
 
     .list-head {
       display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 10px;
-      padding: 16px 18px;
+      flex-direction: column;
+      align-items: stretch;
+      gap: 12px;
+      padding: 16px 18px 18px;
       border-bottom: 1px solid var(--line-soft);
     }
 
-    .list-head strong { font-size: 21px; font-weight: 650; }
+    .list-head strong {
+      font-size: 21px;
+      font-weight: 650;
+      line-height: 1.2;
+      white-space: nowrap;
+    }
 
     .filters {
-      display: flex;
-      flex-wrap: wrap;
+      width: 100%;
+      display: grid;
+      grid-template-columns: minmax(280px, 1.35fr) minmax(160px, 1fr) minmax(140px, .85fr);
       gap: 8px;
       align-items: center;
     }
 
     .filters select,
     .filters input[type="date"] {
-      width: auto;
-      min-width: 104px;
+      width: 100%;
+      min-width: 0;
       padding: 8px 30px 8px 12px;
       background: #fff;
       border-color: var(--line-soft);
     }
 
     .date-filter-control {
+      width: 100%;
+      min-width: 0;
       display: flex;
       align-items: center;
       gap: 6px;
     }
 
     .filters #dateFilter {
-      width: 166px;
-      min-width: 166px;
+      width: 100%;
+      min-width: 0;
       min-height: 42px;
+      flex: 1;
       padding-right: 10px;
       color: var(--ink);
       cursor: pointer;
@@ -834,6 +843,16 @@
       .inline-edit-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     }
 
+    @media (min-width: 861px) and (max-width: 1180px) {
+      .filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .date-filter-control { grid-column: 1 / -1; }
+    }
+
+    @media (max-width: 620px) {
+      .filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .date-filter-control { grid-column: 1 / -1; }
+    }
+
     @media (max-width: 430px) {
       .nav { min-height: 48px; }
       .hero { padding-top: 28px; text-align: left; }
@@ -845,11 +864,8 @@
       .summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .metric:nth-child(3n) { border-right: 1px solid var(--line-soft); }
       .metric:nth-child(2n) { border-right: 0; }
-      .list-head { align-items: flex-start; flex-direction: column; }
-      .filters { width: 100%; display: grid; grid-template-columns: 1fr; }
-      .filters select { width: 100%; }
-      .date-filter-control { width: 100%; }
-      .filters #dateFilter { width: 100%; min-width: 0; flex: 1; }
+      .filters { grid-template-columns: 1fr; }
+      .date-filter-control { grid-column: auto; }
       .actions { grid-template-columns: 1fr 1fr; }
       .inline-edit-grid { grid-template-columns: 1fr; }
       .inline-edit-field.wide { grid-column: auto; }
