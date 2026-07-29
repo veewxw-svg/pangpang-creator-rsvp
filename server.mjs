@@ -815,7 +815,22 @@ async function fetchPage(target) {
     return fetchPageWithCurl(target, { minimal: true });
   }
   if (/xiaohongshu\.com|xhslink\.com/i.test(target)) {
-    return fetchPageWithCurl(target);
+    const primary = await fetchPageWithCurl(target, {
+      compressed: true,
+      cookies: true,
+      referer: "https://www.xiaohongshu.com/"
+    });
+    if (xhsPageScore(primary) >= 3) return primary;
+
+    const fallbackTarget = canonicalRecordWebUrl(primary.finalUrl) || target;
+    const mobile = await fetchPageWithCurl(fallbackTarget, {
+      compressed: true,
+      cookies: true,
+      maxTime: 10,
+      referer: "https://www.xiaohongshu.com/",
+      userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.5 Mobile/15E148 Safari/604.1"
+    }).catch(() => null);
+    return mobile && xhsPageScore(mobile) > xhsPageScore(primary) ? mobile : primary;
   }
 
   try {
@@ -837,19 +852,25 @@ async function fetchPage(target) {
 }
 
 async function fetchPageWithCurl(target, options = {}) {
+  const maxTime = Number(options.maxTime || 15);
   const args = [
     "-L",
     "-sS",
     "--max-time",
-    "15",
+    String(Number.isFinite(maxTime) && maxTime > 0 ? maxTime : 15),
   ];
+  if (options.compressed) args.push("--compressed");
+  if (options.cookies) args.push("-b", "");
   if (!options.minimal) {
     args.push(
       "-A",
-      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36",
+      options.userAgent || "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36",
+      "-H",
+      "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
       "-H",
       "Accept-Language: zh-CN,zh;q=0.9,en;q=0.8"
     );
+    if (options.referer) args.push("-e", options.referer);
   }
   args.push("-w", "\n__FINAL_URL__%{url_effective}\n__HTTP_CODE__%{http_code}", target);
   const { stdout } = await runFile("curl", args, { maxBuffer: 4 * 1024 * 1024 });
@@ -857,6 +878,23 @@ async function fetchPageWithCurl(target, options = {}) {
   const status = Number(stdout.match(/\n__HTTP_CODE__(\d+)/)?.[1] || 0);
   const html = stdout.replace(/\n__FINAL_URL__.*\n__HTTP_CODE__\d+\s*$/s, "");
   return { status, finalUrl, html };
+}
+
+function xhsPageScore(page) {
+  if (!page?.html) return 0;
+  const finalUrl = page.finalUrl || "";
+  const meta = collectMeta(page.html);
+  const ssr = parseXhsSsr(page.html);
+  const post = parseXhsPost(page.html, meta, finalUrl);
+  const titleName = cleanXhsTitle(meta.ogTitle || meta.title || "");
+  let score = 0;
+
+  if (canonicalRecordCreatorUrl(finalUrl) || canonicalRecordPostUrl(finalUrl)) score += 1;
+  if (ssr.name || post.name) score += 4;
+  else if (titleName && !/^(?:小红书|登录|注册|发现|red|rednote)$/i.test(titleName)) score += 3;
+  if (ssr.followers || ssr.engagement) score += 2;
+  if (/"basicInfo"\s*:|"nickname"\s*:|"userId"\s*:/i.test(page.html)) score += 1;
+  return score;
 }
 
 async function fetchApifyInstagram(target) {
