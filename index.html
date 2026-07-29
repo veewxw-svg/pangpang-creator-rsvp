@@ -459,11 +459,37 @@
       border-bottom: 1px solid var(--line-soft);
     }
 
-    .list-head strong {
+    .list-title-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .list-title-row strong {
       font-size: 21px;
       font-weight: 650;
       line-height: 1.2;
       white-space: nowrap;
+    }
+
+    .date-result-count {
+      display: inline-flex;
+      align-items: center;
+      min-height: 30px;
+      padding: 5px 11px;
+      border-radius: 999px;
+      background: rgba(0, 113, 227, .1);
+      color: var(--blue);
+      font-size: 14px;
+      font-weight: 650;
+      line-height: 1.2;
+      white-space: nowrap;
+    }
+
+    .date-result-count[hidden] {
+      display: none;
     }
 
     .filters {
@@ -973,7 +999,10 @@
         <div class="panel review-panel hidden" id="reviewPanel"></div>
         <div class="panel list-panel">
           <div class="list-head">
-            <strong>预约记录</strong>
+            <div class="list-title-row">
+              <strong>预约记录</strong>
+              <span class="date-result-count" id="dateResultCount" hidden></span>
+            </div>
             <div class="filters">
               <div class="date-filter-control">
                 <input id="dateFilter" type="date" lang="zh-CN" aria-label="筛选日期" title="选择日期">
@@ -1050,6 +1079,7 @@
     const reviewPanel = $("reviewPanel");
     const reportPanel = $("reportPanel");
     const dateFilter = $("dateFilter");
+    const dateResultCount = $("dateResultCount");
     const ownerFilter = $("ownerFilter");
     const statusFilter = $("statusFilter");
     const cancelDialog = $("cancelDialog");
@@ -1774,6 +1804,7 @@
     function render() {
       const records = getFilteredRecords();
       renderSummary();
+      renderDateResultCount(records);
       if (!records.length) {
         recordList.innerHTML = '<div class="empty">还没有预约记录</div>';
         return;
@@ -1998,6 +2029,21 @@
         const label = value || "未填写";
         return `<option value="${escapeHtml(value)}"${value === selected ? " selected" : ""}>${escapeHtml(label)}</option>`;
       }).join("");
+    }
+
+    function renderDateResultCount(records) {
+      const dateValue = dateFilter.value;
+      if (!dateValue) {
+        dateResultCount.hidden = true;
+        dateResultCount.textContent = "";
+        return;
+      }
+      const dayTotal = state.records.filter((item) => item.dateISO === dateValue && !isArchivedRecord(item)).length;
+      const hasExtraFilter = ownerFilter.value !== "all" || statusFilter.value !== "all";
+      dateResultCount.textContent = hasExtraFilter
+        ? `当天共 ${dayTotal} 位 · 当前 ${records.length} 位`
+        : `当天共 ${dayTotal} 位博主`;
+      dateResultCount.hidden = false;
     }
 
     function displayTimeToInput(value) {
