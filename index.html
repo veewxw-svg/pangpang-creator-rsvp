@@ -597,6 +597,91 @@
 
     .actions button:hover { background: #fff; }
 
+    .record.inline-editing {
+      display: block;
+      padding: 18px;
+      background: #fbfbfd;
+      box-shadow: inset 3px 0 0 var(--brand);
+    }
+
+    .inline-edit-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+
+    .inline-edit-head strong {
+      display: block;
+      font-size: 18px;
+      font-weight: 650;
+    }
+
+    .inline-edit-head small {
+      display: block;
+      margin-top: 4px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .inline-edit-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .inline-edit-field {
+      min-width: 0;
+      margin: 0;
+    }
+
+    .inline-edit-field > span {
+      display: block;
+      margin-bottom: 8px;
+    }
+
+    .inline-edit-field.wide {
+      grid-column: span 2;
+    }
+
+    .inline-edit-field input,
+    .inline-edit-field select {
+      min-height: 46px;
+      background: #fff;
+      border-color: var(--line-soft);
+    }
+
+    .inline-edit-field input[type="date"],
+    .inline-edit-field input[type="time"] {
+      min-width: 0;
+    }
+
+    .inline-edit-message {
+      margin-top: 12px;
+      padding: 10px 12px;
+      border-radius: var(--radius);
+      background: rgba(215, 0, 21, .08);
+      color: var(--red);
+      font-size: 13px;
+      line-height: 1.4;
+    }
+
+    .inline-edit-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+      margin-top: 16px;
+    }
+
+    .inline-edit-actions button {
+      width: auto;
+      min-width: 132px;
+      min-height: 42px;
+      height: 42px;
+      padding: 8px 18px;
+    }
+
     .empty {
       padding: 28px 14px;
       color: var(--muted);
@@ -640,6 +725,7 @@
         grid-column: 1 / -1;
         grid-template-columns: repeat(3, 1fr);
       }
+      .inline-edit-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     }
 
     @media (max-width: 430px) {
@@ -657,6 +743,10 @@
       .filters { width: 100%; }
       .filters select { width: 100%; }
       .actions { grid-template-columns: 1fr 1fr; }
+      .inline-edit-grid { grid-template-columns: 1fr; }
+      .inline-edit-field.wide { grid-column: auto; }
+      .inline-edit-actions { display: grid; grid-template-columns: 1fr 1fr; }
+      .inline-edit-actions button { width: 100%; min-width: 0; }
       .review-head, .report-head, .review-actions { flex-direction: column; }
       .review-actions .primary, .review-actions .secondary { width: 100%; }
     }
@@ -789,6 +879,8 @@
       pendingRecord: null,
       pendingPostRecord: null,
       editingId: "",
+      inlineEditingId: "",
+      inlineEditError: "",
       mode: "booking"
     };
 
@@ -1030,26 +1122,16 @@
     }
 
     function startEditRecord(id) {
-      const record = state.records.find((item) => item.id === id);
+      const record = state.records.find((item) => String(item.id || "") === String(id || ""));
       if (!record) return;
-      state.editingId = id;
-      state.pendingRecord = null;
-      setMode(record.type || "booking");
-      profileText.value = record.type === "post" ? (record.postUrl || record.link || "") : (record.link || "");
-      bookingText.value = [
-        record.dateISO || record.dateText || "",
-        record.timeText || "",
-        record.pax ? `${record.pax} pax` : "",
-        record.phone || ""
-      ].filter(Boolean).join(" ");
-      owner.value = record.owner || record.submitter || "";
-      visitType.value = record.visitType || "";
-      feeAmount.value = record.feeAmount || "";
-      syncVisitTypeFields();
-      remarks.value = record.remarks || "";
-      statusLine.textContent = "正在修改这一条，改好后点保存修改";
-      reviewPanel.classList.add("hidden");
-      form.scrollIntoView({ behavior: "smooth", block: "start" });
+      state.inlineEditingId = String(id);
+      state.inlineEditError = "";
+      render();
+      requestAnimationFrame(() => {
+        const editor = recordList.querySelector(`[data-inline-editor="${String(id)}"]`);
+        const dateInput = editor?.querySelector('[data-inline-field="dateISO"]');
+        if (dateInput) dateInput.focus({ preventScroll: true });
+      });
     }
 
     function syncVisitTypeFields() {
@@ -1528,6 +1610,20 @@
       recordList.querySelectorAll("[data-edit]").forEach((btn) => {
         btn.addEventListener("click", () => startEditRecord(btn.dataset.edit));
       });
+      recordList.querySelectorAll("[data-inline-cancel]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          state.inlineEditingId = "";
+          state.inlineEditError = "";
+          render();
+        });
+      });
+      recordList.querySelectorAll("[data-inline-save]").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          btn.disabled = true;
+          btn.textContent = "正在保存...";
+          await saveInlineEdit(btn.dataset.inlineSave, btn.closest("[data-inline-editor]"));
+        });
+      });
       recordList.querySelectorAll("[data-cancel]").forEach((btn) => {
         btn.addEventListener("click", () => {
           const record = state.records.find((item) => item.id === btn.dataset.cancel);
@@ -1586,6 +1682,9 @@
       const classes = ["record"];
       if (isHighlighted(record)) classes.push(status === "已发布" ? "post-update" : "new-update");
       const linkButtons = renderLinkButtons(record);
+      if (state.inlineEditingId === String(record.id || "")) {
+        return renderInlineEditor(record, classes, status, title);
+      }
       return `<article class="${classes.join(" ")}" data-record-id="${escapeHtml(record.id || "")}">
         <div>
           <div class="time">${escapeHtml(record.timeText || "--")}</div>
@@ -1604,6 +1703,162 @@
           ${status === "取消" ? `<button type="button" data-restore="${record.id}">恢复</button>` : status === "已发布" ? "" : `<button type="button" data-cancel="${record.id}">取消</button>`}
         </div>
       </article>`;
+    }
+
+    function renderInlineEditor(record, classes, status, title) {
+      const recordId = String(record.id || "");
+      const ownerValue = record.submitter || record.owner || "";
+      const ownerOptions = selectOptions(ownerValue, ["", "中文板块营销专员", "英文板块营销专员"]);
+      const visitTypeOptions = selectOptions(record.visitType || "", ["", "免费探店", "付费探店"]);
+      const statusOptions = selectOptions(status, ["新增", "已发布", "取消"]);
+      classes.push("inline-editing");
+      return `<article class="${classes.join(" ")}" data-record-id="${escapeHtml(recordId)}" data-inline-editor="${escapeHtml(recordId)}">
+        <div class="inline-edit-head">
+          <div>
+            <strong>直接修改 · ${escapeHtml(title)}</strong>
+            <small>改好后在这里保存，不会跳到其他位置</small>
+          </div>
+          <span class="chip ${escapeHtml(status)}">${escapeHtml(status)}</span>
+        </div>
+        <div class="inline-edit-grid">
+          <label class="inline-edit-field">
+            <span>探店日期</span>
+            <input type="date" data-inline-field="dateISO" value="${escapeHtml(record.dateISO || "")}">
+          </label>
+          <label class="inline-edit-field">
+            <span>时间</span>
+            <input type="time" data-inline-field="timeText" value="${escapeHtml(displayTimeToInput(record.timeText))}">
+          </label>
+          <label class="inline-edit-field">
+            <span>人数</span>
+            <input type="number" min="1" inputmode="numeric" data-inline-field="pax" value="${escapeHtml(record.pax || "")}" placeholder="例如 2">
+          </label>
+          <label class="inline-edit-field">
+            <span>电话</span>
+            <input type="tel" inputmode="tel" data-inline-field="phone" value="${escapeHtml(record.phone || "")}" placeholder="例如 92954999">
+          </label>
+          <label class="inline-edit-field wide">
+            <span>博主名字</span>
+            <input data-inline-field="name" value="${escapeHtml(record.name || "")}" placeholder="博主名字">
+          </label>
+          <label class="inline-edit-field">
+            <span>记录状态</span>
+            <select data-inline-field="status">${statusOptions}</select>
+          </label>
+          <label class="inline-edit-field">
+            <span>提交人</span>
+            <select data-inline-field="owner">${ownerOptions}</select>
+          </label>
+          <label class="inline-edit-field">
+            <span>博主状态</span>
+            <select data-inline-field="visitType">${visitTypeOptions}</select>
+          </label>
+          <label class="inline-edit-field">
+            <span>付费金额</span>
+            <input data-inline-field="feeAmount" value="${escapeHtml(record.feeAmount || "")}" placeholder="仅付费探店填写">
+          </label>
+          <label class="inline-edit-field wide">
+            <span>备注</span>
+            <input data-inline-field="remarks" value="${escapeHtml(record.remarks || "")}" placeholder="备注">
+          </label>
+        </div>
+        ${state.inlineEditError ? `<div class="inline-edit-message">${escapeHtml(state.inlineEditError)}</div>` : ""}
+        <div class="inline-edit-actions">
+          <button class="secondary" type="button" data-inline-cancel="${escapeHtml(recordId)}">取消修改</button>
+          <button class="primary" type="button" data-inline-save="${escapeHtml(recordId)}">保存修改</button>
+        </div>
+      </article>`;
+    }
+
+    function selectOptions(selectedValue, choices) {
+      const selected = String(selectedValue || "");
+      const values = Array.from(new Set(["", selected, ...choices]));
+      return values.map((value) => {
+        const label = value || "未填写";
+        return `<option value="${escapeHtml(value)}"${value === selected ? " selected" : ""}>${escapeHtml(label)}</option>`;
+      }).join("");
+    }
+
+    function displayTimeToInput(value) {
+      const raw = String(value || "").trim().toLowerCase();
+      const match = raw.match(/^(\d{1,2}):(\d{2})\s*(am|pm)?$/);
+      if (!match) return "";
+      let hour = Number(match[1]);
+      const minute = Number(match[2]);
+      const suffix = match[3] || "";
+      if (suffix === "pm" && hour < 12) hour += 12;
+      if (suffix === "am" && hour === 12) hour = 0;
+      if (hour > 23 || minute > 59) return "";
+      return `${pad(hour)}:${pad(minute)}`;
+    }
+
+    function inputTimeToDisplay(value) {
+      const match = String(value || "").match(/^(\d{2}):(\d{2})$/);
+      if (!match) return "";
+      const hour = Number(match[1]);
+      const minute = Number(match[2]);
+      if (hour > 23 || minute > 59) return "";
+      return toDisplayTime(hour, minute, "");
+    }
+
+    async function saveInlineEdit(id, editor) {
+      const recordId = String(id || "");
+      const existing = state.records.find((item) => String(item.id || "") === recordId);
+      if (!existing || !editor) {
+        state.inlineEditingId = "";
+        state.inlineEditError = "";
+        render();
+        return;
+      }
+      const fieldValue = (name) => editor.querySelector(`[data-inline-field="${name}"]`)?.value.trim() || "";
+      const parsedDate = fieldValue("dateISO") ? parseDate(fieldValue("dateISO")) : { dateISO: "", dateText: "", weekday: "" };
+      const ownerValue = fieldValue("owner");
+      const visitTypeValue = fieldValue("visitType");
+      const updated = {
+        ...existing,
+        name: fieldValue("name"),
+        status: normalizeStatus(fieldValue("status")),
+        dateISO: parsedDate.dateISO,
+        dateText: parsedDate.dateText,
+        weekday: parsedDate.weekday,
+        timeText: inputTimeToDisplay(fieldValue("timeText")),
+        pax: fieldValue("pax"),
+        phone: fieldValue("phone"),
+        owner: ownerValue,
+        submitter: ownerValue,
+        reportLang: ownerValue.includes("英文") ? "英文" : ownerValue.includes("中文") ? "中文" : "",
+        visitType: visitTypeValue,
+        feeAmount: visitTypeValue === "付费探店" ? fieldValue("feeAmount") : "",
+        remarks: fieldValue("remarks"),
+        createdAt: new Date().toISOString(),
+        highlightUntil: Date.now() + 72 * 60 * 60 * 1000
+      };
+      const duplicate = findDuplicateRecord(updated, state.records, recordId);
+      if (duplicate) {
+        state.inlineEditError = `重复提醒：${displayCreatorName(duplicate)} 的相同日期和时间已经存在，本次没有保存。`;
+        showToast("重复信息，未保存");
+        render();
+        return;
+      }
+
+      const previousRecords = state.records;
+      state.records = state.records.map((item) => String(item.id || "") === recordId ? updated : item);
+      const saveResult = await saveRecords({ highlightIds: [recordId] });
+      if (saveResult?.duplicate) {
+        state.records = previousRecords;
+        localStorage.setItem(KEY, JSON.stringify(state.records));
+        const serverDuplicate = state.records.find((item) => String(item.id || "") === String(saveResult.duplicateId || ""));
+        state.inlineEditError = saveResult.message || `重复提醒：${displayCreatorName(serverDuplicate || updated)} 的相同记录已经存在，本次没有保存。`;
+        showToast("重复信息，未保存");
+        render();
+        return;
+      }
+
+      state.inlineEditingId = "";
+      state.inlineEditError = "";
+      statusLine.textContent = `已保存修改：${updated.dateText || "未填日期"} ${updated.timeText || "未填时间"} ${displayCreatorName(updated)}`;
+      render();
+      showToast("修改已保存");
     }
 
     function scrollToRecord(id) {
