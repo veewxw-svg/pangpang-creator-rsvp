@@ -400,7 +400,9 @@ function mergeRecords(existingRecords, incomingRecords) {
     if (record && record.id) byId.set(String(record.id), record);
   }
   for (const record of Array.isArray(incomingRecords) ? incomingRecords : []) {
-    if (record && record.id) byId.set(String(record.id), record);
+    if (!record || !record.id) continue;
+    const id = String(record.id);
+    byId.set(id, { ...(byId.get(id) || {}), ...record });
   }
   return Array.from(byId.values());
 }
