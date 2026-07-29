@@ -623,7 +623,7 @@ async function sendDailyReportEmail(records, highlightIds = [], day = reportDate
   };
   if (pdf) {
     payload.attachments = [{
-        filename: "PangPang_博主探店预约全局表.pdf",
+        filename: `PangPang RSVP ${day}.pdf`,
         content: pdf.toString("base64")
     }];
   }
