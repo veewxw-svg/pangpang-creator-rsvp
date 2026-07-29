@@ -2,7 +2,7 @@ import json
 import os
 import time
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 from PIL import Image, ImageDraw, ImageFont
 
 
@@ -44,25 +44,43 @@ def normalize_loose(value):
     return "".join(str(value or "").strip().lower().split())
 
 
-def normalize_profile_url(value):
+def canonical_web_parts(value):
     raw = str(value or "").strip()
     if not raw:
-        return ""
+        return "", ""
     try:
         parsed = urlparse(raw)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            return "", ""
         host = parsed.netloc.lower().removeprefix("www.")
+        query = parse_qs(parsed.query)
+        redirect_path = (query.get("redirectPath") or [""])[0]
+        if is_domain(host, "xiaohongshu.com") and parsed.path.rstrip("/").lower() == "/login" and redirect_path:
+            nested = urlparse(redirect_path)
+            nested_host = nested.netloc.lower().removeprefix("www.")
+            if nested.scheme in {"http", "https"} and is_domain(nested_host, "xiaohongshu.com"):
+                parsed = nested
+                host = nested_host
         path = parsed.path.rstrip("/").lower()
-        return f"{host}{path}" if host or path else ""
+        return host, path
     except Exception:
-        return normalize_loose(raw.split("?")[0].split("#")[0])
+        return "", ""
 
 
-def duplicate_key(record):
-    if not record or normalize_status(record.get("status")) == "取消":
-        return ""
-    profile = normalize_profile_url(record.get("link") or record.get("profileUrl") or "")
-    if profile:
-        return f"url:{profile}"
+def is_domain(host, domain):
+    return host == domain or host.endswith(f".{domain}")
+
+
+def creator_identity(record):
+    host, path = canonical_web_parts(record.get("link") or record.get("profileUrl") or "")
+    is_creator_url = (
+        (is_domain(host, "xiaohongshu.com") and path.startswith("/user/profile/") and len(path.split("/")) == 4)
+        or (is_domain(host, "instagram.com") and instagram_creator_path(path))
+        or (is_domain(host, "tiktok.com") and path.startswith("/@") and len(path.split("/")) == 2)
+        or (is_domain(host, "facebook.com") and path and not path.startswith(("/share", "/watch", "/reel", "/photo")))
+    )
+    if is_creator_url:
+        return f"url:{host}{path}"
     platform = normalize_loose(record.get("platform"))
     handle = normalize_loose(str(record.get("handle") or "").lstrip("@"))
     if platform and handle:
@@ -71,13 +89,47 @@ def duplicate_key(record):
     return f"name:{platform}:{name}" if platform and name else ""
 
 
+def instagram_creator_path(path):
+    segment = next((part for part in path.split("/") if part), "")
+    return bool(segment and segment not in {"p", "reel", "reels", "explore", "accounts", "direct", "stories", "share"})
+
+
+def post_identity(value):
+    host, path = canonical_web_parts(value)
+    is_post_url = (
+        (is_domain(host, "xiaohongshu.com") and (path.startswith("/explore/") or path.startswith("/discovery/item/")))
+        or (is_domain(host, "xhslink.com") and bool(path))
+        or (is_domain(host, "instagram.com") and path.startswith(("/p/", "/reel/", "/reels/")))
+        or (is_domain(host, "tiktok.com") and "/video/" in path)
+    )
+    return f"{host}{path}" if is_post_url else ""
+
+
+def duplicate_keys(record):
+    if not record or normalize_status(record.get("status")) == "取消":
+        return []
+    keys = []
+    post = post_identity(record.get("postUrl") or "")
+    if post:
+        keys.append(f"post:{post}")
+    creator = creator_identity(record)
+    date = normalize_loose(record.get("dateISO") or record.get("dateText") or "")
+    visit_time = normalize_loose(record.get("timeText") or "")
+    if creator and record.get("type") != "post" and date and visit_time:
+        keys.append(f"booking:{creator}:{date}:{visit_time}")
+    return keys
+
+
 def duplicate_ids(records):
     counts = {}
     for record in records:
-        key = duplicate_key(record)
-        if key:
+        for key in duplicate_keys(record):
             counts[key] = counts.get(key, 0) + 1
-    return {str(record.get("id") or "") for record in records if counts.get(duplicate_key(record), 0) > 1}
+    return {
+        str(record.get("id") or "")
+        for record in records
+        if any(counts.get(key, 0) > 1 for key in duplicate_keys(record))
+    }
 
 
 def sort_minutes(value):
