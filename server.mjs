@@ -656,8 +656,9 @@ function buildDailySummaryHtml(records, highlightIds = []) {
     else groups.added.push(record);
   }
   const section = (title, items) => {
-    const rows = items.map((record) => `<li>${escapeHtml(recordBrief(record))}</li>`).join("");
-    return `<div style="margin:14px 0 0"><b>${title}（${items.length}）</b>${items.length ? `<ul style="margin:8px 0 0 18px;padding:0;line-height:1.55">${rows}</ul>` : "<p style=\"margin:6px 0 0;color:#86868b\">无</p>"}</div>`;
+    const sortedItems = items.slice().sort(compareDailyBriefRecords);
+    const rows = sortedItems.map((record) => `<li>${escapeHtml(recordBrief(record))}</li>`).join("");
+    return `<div style="margin:14px 0 0"><b>${title}（${sortedItems.length}）</b>${sortedItems.length ? `<ul style="margin:8px 0 0 18px;padding:0;line-height:1.55">${rows}</ul>` : "<p style=\"margin:6px 0 0;color:#86868b\">无</p>"}</div>`;
   };
   return [
     "<div style=\"margin:16px 0;padding:14px 16px;background:#f5f5f7;border-radius:14px\">",
@@ -667,6 +668,68 @@ function buildDailySummaryHtml(records, highlightIds = []) {
     section("取消", groups.cancelled),
     "</div>"
   ].join("");
+}
+
+function compareDailyBriefRecords(left, right) {
+  const dateDifference = dailyBriefDateValue(left) - dailyBriefDateValue(right);
+  if (dateDifference) return dateDifference;
+  const timeDifference = dailyBriefTimeValue(left?.timeText) - dailyBriefTimeValue(right?.timeText);
+  if (timeDifference) return timeDifference;
+  const leftName = String(left?.name || left?.handle || "");
+  const rightName = String(right?.name || right?.handle || "");
+  return leftName.localeCompare(rightName, "zh-CN", { numeric: true, sensitivity: "base" });
+}
+
+function dailyBriefDateValue(record) {
+  const iso = String(record?.dateISO || "").trim();
+  const isoMatch = iso.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (isoMatch) {
+    const value = validUtcDate(Number(isoMatch[1]), Number(isoMatch[2]), Number(isoMatch[3]));
+    if (Number.isFinite(value)) return value;
+  }
+
+  const text = String(record?.dateText || "").trim();
+  const monthNumbers = {
+    jan: 1, january: 1, feb: 2, february: 2, mar: 3, march: 3, apr: 4, april: 4,
+    may: 5, jun: 6, june: 6, jul: 7, july: 7, aug: 8, august: 8, sep: 9, sept: 9,
+    september: 9, oct: 10, october: 10, nov: 11, november: 11, dec: 12, december: 12
+  };
+  const english = text.match(/\b(\d{1,2})\s+(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t)?(?:ember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)(?:[,\s]+(20\d{2}))?/i);
+  if (english) {
+    const year = Number(english[3] || reportDateKey().slice(0, 4));
+    const month = monthNumbers[english[2].toLowerCase()];
+    const value = validUtcDate(year, month, Number(english[1]));
+    if (Number.isFinite(value)) return value;
+  }
+
+  const chinese = text.match(/(?:(20\d{2})年)?(\d{1,2})月(\d{1,2})日/);
+  if (chinese) {
+    const year = Number(chinese[1] || reportDateKey().slice(0, 4));
+    const value = validUtcDate(year, Number(chinese[2]), Number(chinese[3]));
+    if (Number.isFinite(value)) return value;
+  }
+  return Number.POSITIVE_INFINITY;
+}
+
+function validUtcDate(year, month, day) {
+  const value = Date.UTC(year, month - 1, day);
+  const date = new Date(value);
+  if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) {
+    return Number.NaN;
+  }
+  return value;
+}
+
+function dailyBriefTimeValue(value) {
+  const match = String(value || "").trim().toLowerCase().match(/^(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$/);
+  if (!match) return Number.POSITIVE_INFINITY;
+  let hour = Number(match[1]);
+  const minute = Number(match[2] || 0);
+  const suffix = match[3] || "";
+  if (suffix === "pm" && hour < 12) hour += 12;
+  if (suffix === "am" && hour === 12) hour = 0;
+  if (hour > 23 || minute > 59) return Number.POSITIVE_INFINITY;
+  return hour * 60 + minute;
 }
 
 function recordBrief(record) {
