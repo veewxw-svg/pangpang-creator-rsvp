@@ -769,6 +769,7 @@ async function resolveProfile(target) {
     const html = page.html;
     const meta = collectMeta(html);
     const ssr = parseXhsSsr(html);
+    const xhsVisible = parseXhsVisibleProfile(html, meta);
     const xhsPost = parseXhsPost(html, meta, finalUrl);
     const instagram = parseInstagramMeta(meta, html, finalUrl);
     const isXhs = /xiaohongshu\.com|xhslink\.com/i.test(finalUrl);
@@ -789,17 +790,17 @@ async function resolveProfile(target) {
       postUrl: instagram.postUrl || xhsPost.postUrl || parsed.postUrl || "",
       platform: instagramJson.platform || instagram.platform || parsed.platform,
       handle: instagramJson.handle || instagram.handle || xhsPost.handle || (isInstagramPost ? "" : parsed.handle),
-      name: instagramJson.name || instagram.name || xhsPost.name || ssr.name || parsed.name || titleName,
-      followers: instagramJson.followers || instagram.followers || ssr.followers || (parsed.followers && parsed.followers !== "1" ? parsed.followers : ""),
+      name: instagramJson.name || instagram.name || xhsPost.name || ssr.name || xhsVisible.name || parsed.name || titleName,
+      followers: instagramJson.followers || instagram.followers || xhsVisible.followers || ssr.followers || (parsed.followers && parsed.followers !== "1" ? parsed.followers : ""),
       engagement: instagramJson.engagement || instagram.engagement || ssr.engagement || parsed.engagement,
-      following: instagramJson.following || instagram.following || "",
+      following: instagramJson.following || instagram.following || xhsVisible.following || "",
       postCount: instagramJson.postCount || instagram.postCount || "",
       postLikes: xhsPost.postLikes || instagram.postLikes || "",
       postCollects: xhsPost.postCollects || "",
       postComments: xhsPost.postComments || instagram.postComments || "",
       postShares: xhsPost.postShares || "",
       postMetricsText: xhsPost.postMetricsText || instagram.postMetricsText || "",
-      redId: ssr.redId || "",
+      redId: xhsVisible.redId || ssr.redId || "",
       description: instagramJson.description || instagram.description || xhsPost.description || ssr.description || "",
       postTitle: instagram.postTitle || xhsPost.postTitle || parsed.postTitle,
       publishedAt,
@@ -1356,6 +1357,41 @@ function parseXhsSsr(html) {
     description: read(/"basicInfo":\{[\s\S]*?"desc":"((?:\\.|[^"])*)"/),
     followers: readInteraction("粉丝", "fans"),
     engagement: readInteraction("获赞与收藏", "interaction")
+  };
+}
+
+function parseXhsVisibleProfile(html, meta = {}) {
+  const sources = [
+    meta.ogTitle,
+    meta.title,
+    meta.ogDescription,
+    meta.description,
+    stripTags(html).slice(0, 8000)
+  ].filter(Boolean).map((value) => decodeEntities(value).replace(/\s+/g, " ").trim());
+  const source = sources.join(" ");
+  let name = "";
+  for (const value of sources) {
+    const personalHome = value.match(/^@?([^@|｜,，。]{1,40}?)\s*的个人主页/i);
+    const xhsIntro = value.match(/^@?([^@|｜,，。]{1,24}?)\s*(?:在|于)[「“"]?小红书/i);
+    const match = personalHome || xhsIntro;
+    if (match?.[1]) {
+      name = match[1].replace(/^@/, "").trim();
+      break;
+    }
+  }
+  if (!name) {
+    const titleName = cleanXhsTitle(meta.ogTitle || meta.title || "").replace(/^@/, "").trim();
+    if (titleName.length <= 40) name = titleName;
+  }
+  const followerMatch = source.match(/(?:有|拥有)\s*([\d,.]+)\s*([万kKmM]?)\s*位?粉丝/i);
+  const followingMatch = source.match(/已关注\s*([\d,.]+)\s*([万kKmM]?)(?:人|位)?/i);
+  const redIdMatch = source.match(/小红书号\s*[:：]?\s*([A-Za-z0-9_-]{3,32})/i);
+
+  return {
+    name: /^(?:打开|登录|注册|发现|小红书)$/i.test(name) ? "" : name,
+    followers: followerMatch ? normalizeNumber(followerMatch[1], followerMatch[2]) : "",
+    following: followingMatch ? normalizeNumber(followingMatch[1], followingMatch[2]) : "",
+    redId: redIdMatch?.[1] || ""
   };
 }
 
