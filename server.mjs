@@ -85,7 +85,8 @@ createServer(async (req, res) => {
         if (duplicate) return { duplicate };
 
         await writeRecords(records);
-        const notification = body.silent ? { skipped: true, reason: "silent update" } : await queueDailyChanges(highlightIds);
+        const reportableIds = reportableHighlightIds(records, highlightIds);
+        const notification = body.silent ? { skipped: true, reason: "silent update" } : await queueDailyChanges(reportableIds);
         return { records, notification };
       });
 
@@ -431,7 +432,7 @@ function findChangedDuplicate(records, changedIds) {
 }
 
 function duplicateKeys(record) {
-  if (!record || normalizedRecordStatus(record.status) === "取消") return [];
+  if (!record || isInactiveRecord(record)) return [];
   const keys = [];
   const post = canonicalRecordUrlIdentity(canonicalRecordPostUrl(record.postUrl || ""));
   if (post) keys.push(`post:${post}`);
@@ -525,7 +526,26 @@ function normalizeRecordText(value) {
 function normalizedRecordStatus(status) {
   if (status === "已发布") return "已发布";
   if (status === "取消") return "取消";
+  if (status === "爽约") return "爽约";
   return "新增";
+}
+
+function isArchivedRecord(record) {
+  return Boolean(record?.archived || record?.cancelReason === "填错" || record?.cancelReason === "改约");
+}
+
+function isInactiveRecord(record) {
+  const status = normalizedRecordStatus(record?.status);
+  return isArchivedRecord(record) || status === "取消" || status === "爽约";
+}
+
+function reportableRecords(records) {
+  return (Array.isArray(records) ? records : []).filter((record) => !isArchivedRecord(record));
+}
+
+function reportableHighlightIds(records, highlightIds = []) {
+  const visibleIds = new Set(reportableRecords(records).map((record) => String(record?.id || "")).filter(Boolean));
+  return (highlightIds || []).map(String).filter((id) => visibleIds.has(id));
 }
 
 function duplicateMessage(record, existing) {
@@ -536,7 +556,7 @@ function duplicateMessage(record, existing) {
 
 async function generateReportPng(records, highlightIds = []) {
   await mkdir(outputDir, { recursive: true });
-  const reportRecordsPath = await writeReportRecordsSnapshot(records, "report-records-png.json");
+  const reportRecordsPath = await writeReportRecordsSnapshot(reportableRecords(records), "report-records-png.json");
   await runFile(pythonBin, [reportScript], {
     env: {
       ...process.env,
@@ -550,7 +570,7 @@ async function generateReportPng(records, highlightIds = []) {
 
 async function generateReportPdf(records, highlightIds = [], reportDate = readableReportDate()) {
   await mkdir(outputDir, { recursive: true });
-  const reportRecordsPath = await writeReportRecordsSnapshot(records, "report-records-pdf.json");
+  const reportRecordsPath = await writeReportRecordsSnapshot(reportableRecords(records), "report-records-pdf.json");
   await runFile(pythonBin, [reportPdfScript], {
     env: {
       ...process.env,
@@ -576,9 +596,10 @@ async function sendDailyReport({ force = false } = {}) {
     return { ok: true, sent: false, reason: "already sent today", day };
   }
   const records = await readRecords();
-  const changedIds = Array.isArray(await readState("pendingDailyChanges", []))
+  const pendingIds = Array.isArray(await readState("pendingDailyChanges", []))
     ? [...new Set((await readState("pendingDailyChanges", [])).map(String).filter(Boolean))]
     : [];
+  const changedIds = reportableHighlightIds(records, pendingIds);
   const result = await sendDailyReportEmail(records, changedIds, day);
   if (result.sent) {
     await writeState("lastDailyReportDay", day);
@@ -614,7 +635,7 @@ async function sendDailyReportEmail(records, highlightIds = [], day = reportDate
       "<div style=\"font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#1d1d1f\">",
       "<h2>PangPang 博主探店预约日报</h2>",
       hasChanges
-        ? `<p>${day} 共有 ${highlightIds.length} 条变动，最新全局表 PDF 已附在邮件里。浅蓝=当天新增预约，浅绿=当天发帖更新，浅红=取消。</p>`
+        ? `<p>${day} 共有 ${highlightIds.length} 条变动，最新全局表 PDF 已附在邮件里。浅蓝=当天新增预约，浅绿=当天发帖更新，浅红=取消，浅橙=爽约。</p>`
         : `<p>${day} 今天没有改变。</p>`,
       hasChanges ? summaryHtml : "",
       hasChanges ? "<p>主页和帖子按钮放在 PDF 里，可直接点击打开。</p>" : "",
@@ -646,12 +667,15 @@ function buildDailySummaryHtml(records, highlightIds = []) {
   const groups = {
     added: [],
     published: [],
-    cancelled: []
+    cancelled: [],
+    noShows: []
   };
   for (const record of Array.isArray(records) ? records : []) {
+    if (isArchivedRecord(record)) continue;
     if (!changed.has(String(record?.id || ""))) continue;
     const status = normalizeStatusText(record.status);
-    if (status === "取消") groups.cancelled.push(record);
+    if (status === "爽约") groups.noShows.push(record);
+    else if (status === "取消") groups.cancelled.push(record);
     else if (status === "已发布") groups.published.push(record);
     else groups.added.push(record);
   }
@@ -666,6 +690,7 @@ function buildDailySummaryHtml(records, highlightIds = []) {
     section("新增/更新", groups.added),
     section("已发布", groups.published),
     section("取消", groups.cancelled),
+    section("爽约", groups.noShows),
     "</div>"
   ].join("");
 }
@@ -740,13 +765,15 @@ function recordBrief(record) {
   const platform = record.platform || "";
   const post = record.postMetricsText ? `帖子数据 ${record.postMetricsText}` : "";
   const postedAt = record.postDateText || "";
-  return [name, platform, bookingTime, people, phone, postedAt ? `发帖 ${postedAt}` : "", post].filter(Boolean).join(" · ");
+  const reason = record.cancelReason ? `处理原因 ${record.cancelReason}` : "";
+  return [name, platform, bookingTime, people, phone, reason, postedAt ? `发帖 ${postedAt}` : "", post].filter(Boolean).join(" · ");
 }
 
 function normalizeStatusText(status) {
   const text = String(status || "").trim();
   if (text === "已发布" || text === "发布" || text === "发帖") return "已发布";
   if (text === "取消" || text === "已取消") return "取消";
+  if (text === "爽约" || text === "未到店" || text === "no-show") return "爽约";
   return "新增";
 }
 

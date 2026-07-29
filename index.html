@@ -281,7 +281,7 @@
 
     .summary {
       display: grid;
-      grid-template-columns: repeat(5, minmax(0, 1fr));
+      grid-template-columns: repeat(6, minmax(0, 1fr));
       gap: 0;
       margin-bottom: 14px;
       background: #fff;
@@ -575,6 +575,7 @@
     .chip.新增 { background: rgba(36, 138, 61, .12); color: var(--green); }
     .chip.修改 { background: rgba(168, 111, 0, .12); color: var(--yellow); }
     .chip.取消 { background: rgba(215, 0, 21, .1); color: var(--red); }
+    .chip.爽约 { background: rgba(168, 111, 0, .14); color: var(--yellow); }
     .chip.已发布 { background: rgba(88, 86, 214, .12); color: #5856d6; }
     .chip.重复 { background: rgba(168, 111, 0, .14); color: var(--yellow); }
 
@@ -688,6 +689,79 @@
       text-align: center;
     }
 
+    .cancel-modal {
+      position: fixed;
+      inset: 0;
+      z-index: 30;
+      display: grid;
+      place-items: center;
+      padding: 18px;
+      background: rgba(0, 0, 0, .32);
+      backdrop-filter: blur(8px);
+    }
+
+    .cancel-modal.hidden {
+      display: none;
+    }
+
+    .cancel-sheet {
+      width: min(520px, 100%);
+      padding: 24px;
+      border-radius: 24px;
+      background: #fff;
+      box-shadow: 0 24px 70px rgba(0, 0, 0, .2);
+    }
+
+    .cancel-sheet h2 {
+      margin: 0;
+      font-size: 24px;
+    }
+
+    .cancel-sheet p {
+      margin: 8px 0 18px;
+      color: var(--muted);
+      line-height: 1.5;
+    }
+
+    .cancel-options {
+      display: grid;
+      gap: 10px;
+    }
+
+    .cancel-option {
+      width: 100%;
+      min-height: 54px;
+      padding: 11px 14px;
+      border: 1px solid var(--line-soft);
+      border-radius: 16px;
+      background: #f5f5f7;
+      color: var(--ink);
+      text-align: left;
+    }
+
+    .cancel-option strong,
+    .cancel-option small {
+      display: block;
+    }
+
+    .cancel-option small {
+      margin-top: 3px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 500;
+    }
+
+    .cancel-option:hover {
+      background: #fff;
+      border-color: rgba(0, 113, 227, .28);
+    }
+
+    .cancel-close {
+      width: 100%;
+      min-height: 44px;
+      margin-top: 12px;
+    }
+
     .toast {
       position: fixed;
       left: 50%;
@@ -749,6 +823,7 @@
       .inline-edit-actions button { width: 100%; min-width: 0; }
       .review-head, .report-head, .review-actions { flex-direction: column; }
       .review-actions .primary, .review-actions .secondary { width: 100%; }
+      .cancel-sheet { padding: 20px; border-radius: 20px; }
     }
 
     @media print {
@@ -859,7 +934,9 @@
                 <option value="all">全部状态</option>
                 <option>新增</option>
                 <option>取消</option>
+                <option>爽约</option>
                 <option>已发布</option>
+                <option value="archived">作废 / 改约</option>
               </select>
             </div>
           </div>
@@ -869,6 +946,20 @@
       </section>
     </section>
   </main>
+  <div class="cancel-modal hidden" id="cancelDialog" role="dialog" aria-modal="true" aria-labelledby="cancelDialogTitle">
+    <div class="cancel-sheet">
+      <h2 id="cancelDialogTitle">选择处理方式</h2>
+      <p id="cancelDialogRecord">请选择这条预约为什么不再生效。</p>
+      <div class="cancel-options">
+        <button class="cancel-option" type="button" data-cancel-reason="填错"><strong>填错了</strong><small>作废并隐藏，不计入总记录、重复和日报</small></button>
+        <button class="cancel-option" type="button" data-cancel-reason="改约"><strong>重新预约 / 改时间</strong><small>隐藏旧记录，只保留新的有效预约</small></button>
+        <button class="cancel-option" type="button" data-cancel-reason="博主取消"><strong>博主提前取消</strong><small>保留取消记录，但不算爽约</small></button>
+        <button class="cancel-option" type="button" data-cancel-reason="店家取消"><strong>店家取消</strong><small>保留原因，避免误记在博主名下</small></button>
+        <button class="cancel-option" type="button" data-cancel-reason="爽约"><strong>到时间没来 / 爽约</strong><small>永久保留，今后再次预约时提醒</small></button>
+      </div>
+      <button class="secondary cancel-close" type="button" data-cancel-close>先不处理</button>
+    </div>
+  </div>
   <div class="toast" id="toast"></div>
 
   <script>
@@ -881,6 +972,7 @@
       editingId: "",
       inlineEditingId: "",
       inlineEditError: "",
+      cancellingId: "",
       mode: "booking"
     };
 
@@ -905,6 +997,8 @@
     const reportPanel = $("reportPanel");
     const ownerFilter = $("ownerFilter");
     const statusFilter = $("statusFilter");
+    const cancelDialog = $("cancelDialog");
+    const cancelDialogRecord = $("cancelDialogRecord");
 
     if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
       navigator.serviceWorker.register("./sw.js").catch(() => {});
@@ -998,6 +1092,17 @@
     ownerFilter.addEventListener("change", render);
     statusFilter.addEventListener("change", render);
     visitType.addEventListener("change", syncVisitTypeFields);
+    cancelDialog.addEventListener("click", async (event) => {
+      if (event.target === cancelDialog || event.target.closest("[data-cancel-close]")) {
+        closeCancelDialog();
+        return;
+      }
+      const reason = event.target.closest("[data-cancel-reason]")?.dataset.cancelReason;
+      if (reason) await applyCancelReason(reason);
+    });
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && !cancelDialog.classList.contains("hidden")) closeCancelDialog();
+    });
 
     reviewPanel.addEventListener("click", async (event) => {
       const action = event.target.closest("[data-review-action]")?.dataset.reviewAction;
@@ -1160,7 +1265,7 @@
 
     function getPostMatchCandidates() {
       return state.records.filter((item) => {
-        if (item.id === state.editingId || normalizeStatus(item.status) === "取消") return false;
+        if (item.id === state.editingId || isInactiveRecord(item)) return false;
         if (item.type === "post") return false;
         return true;
       });
@@ -1562,7 +1667,16 @@
       const compactAmpm = lower.match(/\b(\d{3,4})\s*(am|pm)\b/);
       if (compactAmpm) {
         const digits = compactAmpm[1];
-        return toDisplayTime(Number(digits.slice(0, -2)), Number(digits.slice(-2)), compactAmpm[2]);
+        const hour = Number(digits.slice(0, -2));
+        const suffix = hour === 0 || hour > 12 ? "" : compactAmpm[2];
+        return toDisplayTime(hour, Number(digits.slice(-2)), suffix);
+      }
+      const mixed24Hour = lower.match(/\b([01]?\d|2[0-3])[:.](\d{2})\s*(am|pm)\b/);
+      if (mixed24Hour) {
+        const hour = Number(mixed24Hour[1]);
+        const minute = Number(mixed24Hour[2]);
+        const suffix = hour === 0 || hour > 12 ? "" : mixed24Hour[3];
+        return toDisplayTime(hour, minute, suffix);
       }
       const ampm = lower.match(/\b(1[0-2]|0?[1-9])(?:[:.](\d{2}))?\s*(am|pm)\b/);
       if (ampm) return toDisplayTime(Number(ampm[1]), Number(ampm[2] || 0), ampm[3]);
@@ -1625,41 +1739,78 @@
         });
       });
       recordList.querySelectorAll("[data-cancel]").forEach((btn) => {
-        btn.addEventListener("click", () => {
-          const record = state.records.find((item) => item.id === btn.dataset.cancel);
-          if (record) {
-            record.status = "取消";
-            record.createdAt = new Date().toISOString();
-            record.highlightUntil = Date.now() + 72 * 60 * 60 * 1000;
-            saveRecords({ highlightIds: [record.id] });
-            render();
-          }
-        });
+        btn.addEventListener("click", () => openCancelDialog(btn.dataset.cancel));
       });
       recordList.querySelectorAll("[data-restore]").forEach((btn) => {
-        btn.addEventListener("click", () => {
+        btn.addEventListener("click", async () => {
           const record = state.records.find((item) => item.id === btn.dataset.restore);
           if (record) {
             record.status = "新增";
+            record.cancelReason = "";
+            record.cancelledAt = "";
+            record.archived = false;
             record.createdAt = new Date().toISOString();
             record.highlightUntil = Date.now() + 72 * 60 * 60 * 1000;
-            saveRecords({ highlightIds: [record.id] });
+            await saveRecords({ highlightIds: [record.id] });
             render();
+            showToast("已恢复为有效预约");
           }
         });
       });
     }
 
+    function openCancelDialog(id) {
+      const record = state.records.find((item) => String(item.id || "") === String(id || ""));
+      if (!record) return;
+      state.cancellingId = String(record.id || "");
+      const schedule = [record.dateText || record.dateISO, record.timeText].filter(Boolean).join(" ");
+      cancelDialogRecord.textContent = `${displayCreatorName(record)}${schedule ? ` · ${schedule}` : ""}。请选择真实原因，避免把提前取消误记成爽约。`;
+      cancelDialog.classList.remove("hidden");
+      cancelDialog.querySelector("[data-cancel-reason]")?.focus();
+    }
+
+    function closeCancelDialog() {
+      state.cancellingId = "";
+      cancelDialog.classList.add("hidden");
+    }
+
+    async function applyCancelReason(reason) {
+      const record = state.records.find((item) => String(item.id || "") === state.cancellingId);
+      if (!record) {
+        closeCancelDialog();
+        return;
+      }
+      const archived = reason === "填错" || reason === "改约";
+      record.status = reason === "爽约" ? "爽约" : "取消";
+      record.cancelReason = reason;
+      record.archived = archived;
+      record.cancelledAt = new Date().toISOString();
+      record.createdAt = new Date().toISOString();
+      record.highlightUntil = archived ? 0 : Date.now() + 72 * 60 * 60 * 1000;
+      closeCancelDialog();
+      await saveRecords({
+        silent: archived,
+        highlightIds: archived ? [] : [record.id]
+      });
+      render();
+      statusLine.textContent = archived
+        ? `已${reason === "填错" ? "作废" : "标记改约"}并隐藏：${displayCreatorName(record)}`
+        : `已记录${reason}：${displayCreatorName(record)}`;
+      showToast(archived ? "已隐藏，不计入统计和日报" : `已记录：${reason}`);
+    }
+
     function renderSummary() {
-      const all = state.records;
+      const all = state.records.filter((item) => !isArchivedRecord(item));
       const booking = all.filter((item) => normalizeStatus(item.status) === "新增").length;
       const cancelled = all.filter((item) => normalizeStatus(item.status) === "取消").length;
+      const noShows = all.filter((item) => normalizeStatus(item.status) === "爽约").length;
       const published = all.filter((item) => normalizeStatus(item.status) === "已发布").length;
       const duplicates = all.filter((item) => isDuplicateRecord(item)).length;
       summary.innerHTML = [
         ["总记录", all.length],
         ["新增", booking],
         ["取消", cancelled],
+        ["爽约", noShows],
         ["已发布", published],
         ["重复", duplicates]
       ].map(([label, value]) => `<div class="metric"><strong>${value}</strong><span>${label}</span></div>`).join("");
@@ -1668,6 +1819,7 @@
     function renderRecord(record) {
       const status = normalizeStatus(record.status);
       const duplicate = isDuplicateRecord(record);
+      const historicalNoShow = status !== "爽约" ? findCreatorNoShow(record, state.records, record.id) : null;
       const title = displayCreatorName(record);
       const details = [
         record.platform,
@@ -1677,6 +1829,7 @@
         record.postMetricsText ? `帖子数据 ${record.postMetricsText}` : "",
         paymentText(record),
         record.phone ? `电话 ${record.phone}` : "",
+        record.cancelReason ? `处理原因 ${record.cancelReason}` : "",
         record.remarks
       ].filter(Boolean).join(" · ");
       const classes = ["record"];
@@ -1691,6 +1844,7 @@
           <div class="pax">${escapeHtml(`${record.pax || "?"} pax`)}</div>
           <span class="chip ${escapeHtml(status)}">${escapeHtml(status)}</span>
           ${duplicate ? '<span class="chip 重复">重复</span>' : ""}
+          ${historicalNoShow ? '<span class="chip 爽约">历史有爽约</span>' : ""}
         </div>
         <div class="creator">
           <b>${escapeHtml(title)}</b>
@@ -1700,7 +1854,9 @@
         </div>
         <div class="actions">
           <button type="button" data-edit="${record.id}">编辑</button>
-          ${status === "取消" ? `<button type="button" data-restore="${record.id}">恢复</button>` : status === "已发布" ? "" : `<button type="button" data-cancel="${record.id}">取消</button>`}
+          ${status === "取消" || status === "爽约"
+            ? `<button type="button" data-cancel="${record.id}">改原因</button><button type="button" data-restore="${record.id}">恢复</button>`
+            : status === "已发布" ? "" : `<button type="button" data-cancel="${record.id}">取消</button>`}
         </div>
       </article>`;
     }
@@ -1710,7 +1866,7 @@
       const ownerValue = record.submitter || record.owner || "";
       const ownerOptions = selectOptions(ownerValue, ["", "中文板块营销专员", "英文板块营销专员"]);
       const visitTypeOptions = selectOptions(record.visitType || "", ["", "免费探店", "付费探店"]);
-      const statusOptions = selectOptions(status, ["新增", "已发布", "取消"]);
+      const statusOptions = selectOptions(status, ["新增", "已发布"]);
       classes.push("inline-editing");
       return `<article class="${classes.join(" ")}" data-record-id="${escapeHtml(recordId)}" data-inline-editor="${escapeHtml(recordId)}">
         <div class="inline-edit-head">
@@ -1814,10 +1970,15 @@
       const parsedDate = fieldValue("dateISO") ? parseDate(fieldValue("dateISO")) : { dateISO: "", dateText: "", weekday: "" };
       const ownerValue = fieldValue("owner");
       const visitTypeValue = fieldValue("visitType");
+      const nextStatus = normalizeStatus(fieldValue("status"));
+      const remainsInactive = nextStatus === "取消" || nextStatus === "爽约";
       const updated = {
         ...existing,
         name: fieldValue("name"),
-        status: normalizeStatus(fieldValue("status")),
+        status: nextStatus,
+        cancelReason: remainsInactive ? (existing.cancelReason || (nextStatus === "爽约" ? "爽约" : "")) : "",
+        cancelledAt: remainsInactive ? (existing.cancelledAt || "") : "",
+        archived: remainsInactive ? isArchivedRecord(existing) : false,
         dateISO: parsedDate.dateISO,
         dateText: parsedDate.dateText,
         weekday: parsedDate.weekday,
@@ -1843,7 +2004,10 @@
 
       const previousRecords = state.records;
       state.records = state.records.map((item) => String(item.id || "") === recordId ? updated : item);
-      const saveResult = await saveRecords({ highlightIds: [recordId] });
+      const saveResult = await saveRecords({
+        silent: isArchivedRecord(updated),
+        highlightIds: isArchivedRecord(updated) ? [] : [recordId]
+      });
       if (saveResult?.duplicate) {
         state.records = previousRecords;
         localStorage.setItem(KEY, JSON.stringify(state.records));
@@ -1872,11 +2036,21 @@
     function normalizeStatus(status) {
       if (status === "已发布") return "已发布";
       if (status === "取消") return "取消";
+      if (status === "爽约") return "爽约";
       return "新增";
     }
 
+    function isArchivedRecord(record) {
+      return Boolean(record?.archived || record?.cancelReason === "填错" || record?.cancelReason === "改约");
+    }
+
+    function isInactiveRecord(record) {
+      const status = normalizeStatus(record?.status);
+      return isArchivedRecord(record) || status === "取消" || status === "爽约";
+    }
+
     function duplicateKeys(record) {
-      if (!record || normalizeStatus(record.status) === "取消") return [];
+      if (!record || isInactiveRecord(record)) return [];
       const keys = [];
       const post = canonicalUrlIdentity(canonicalPostUrl(record.postUrl || ""));
       if (post) keys.push(`post:${post}`);
@@ -1888,6 +2062,16 @@
         keys.push(`booking:${creator}:${date}:${time}`);
       }
       return keys;
+    }
+
+    function findCreatorNoShow(record, records = state.records, ignoreId = "") {
+      const identity = creatorDuplicateIdentity(record);
+      if (!identity) return null;
+      return (records || []).find((item) => {
+        if (!item || String(item.id || "") === String(ignoreId || "")) return false;
+        if (normalizeStatus(item.status) !== "爽约") return false;
+        return creatorDuplicateIdentity(item) === identity;
+      }) || null;
     }
 
     function creatorDuplicateIdentity(record) {
@@ -2022,7 +2206,11 @@
       const statusValue = statusFilter.value;
       return state.records
         .filter((item) => ownerValue === "all" || item.owner === ownerValue)
-        .filter((item) => statusValue === "all" || normalizeStatus(item.status) === statusValue)
+        .filter((item) => {
+          if (statusValue === "archived") return isArchivedRecord(item);
+          if (isArchivedRecord(item)) return false;
+          return statusValue === "all" || normalizeStatus(item.status) === statusValue;
+        })
         .slice()
         .sort(sortRecords);
     }
@@ -2034,7 +2222,11 @@
     }
 
     function statusSortRank(record) {
-      return normalizeStatus(record.status) === "已发布" ? "1" : "0";
+      const status = normalizeStatus(record.status);
+      if (status === "取消") return "1";
+      if (status === "爽约") return "2";
+      if (status === "已发布") return "3";
+      return "0";
     }
 
     function sortMinutes(timeText) {
@@ -2070,11 +2262,13 @@
     function renderReview(record) {
       reviewPanel.classList.remove("hidden");
       const duplicate = isDuplicateRecord(record, recordsWithCandidate(record));
+      const historicalNoShow = findCreatorNoShow(record, state.records, state.editingId || record.id);
       const postMissingText = record.platform === "Instagram" ? "Instagram未公开" : "待补";
       const facts = record.postUrl ? [
         ["博主名字", editableFact("name", record.name || record.handle || ""), true],
         ["主页链接", record.link ? renderLinkButton("查看主页", record.link) : "待补", true],
         ...(duplicate ? [["重复提醒", '<span class="chip 重复">重复博主</span>', true]] : []),
+        ...(historicalNoShow ? [["历史提醒", '<span class="chip 爽约">这位博主以前有爽约记录</span>', true]] : []),
         ["帖子链接", record.postUrl ? renderLinkButton("查看帖子", record.postUrl) : "待补", true],
         ["发布时间", record.postDateText || formatChineseDate(record.postPublishedAt) || postMissingText],
         ["帖子数据", record.postMetricsText || postMissingText],
@@ -2090,6 +2284,7 @@
         ["博主名字", editableFact("name", record.name || record.handle || ""), true],
         ["主页链接", record.link ? renderLinkButton("查看主页", record.link) : "待补", true],
         ...(duplicate ? [["重复提醒", '<span class="chip 重复">重复博主</span>', true]] : []),
+        ...(historicalNoShow ? [["历史提醒", '<span class="chip 爽约">这位博主以前有爽约记录</span>', true]] : []),
         ["粉丝", editableFact("followers", record.followers || ""), true],
         [record.platform === "Instagram" ? "帖子 / 关注" : "赞藏 / 总赞", editableFact("engagement", record.engagement || ""), true],
         ["时间", [record.dateText, record.timeText].filter(Boolean).join(" ") || "待补"],
@@ -2163,7 +2358,7 @@
             <td>${escapeHtml(item.pax || "待补")}</td>
             <td>${escapeHtml(item.phone || "待补")}</td>
             <td>${escapeHtml(paymentText(item) || "待补")}</td>
-            <td>${escapeHtml([normalizeStatus(item.status), isDuplicateRecord(item) ? "重复" : ""].filter(Boolean).join(" / "))}</td>
+            <td>${escapeHtml([normalizeStatus(item.status), item.cancelReason || "", isDuplicateRecord(item) ? "重复" : ""].filter(Boolean).join(" / "))}</td>
           </tr>`).join("")}
         </tbody>
       </table>`;
@@ -2183,9 +2378,9 @@
     }
 
     function exportCsv() {
-      const header = ["信息类型", "状态", "是否重复", "是否高亮", "日期", "星期", "时间", "发帖日期", "平台", "博主账号", "名字", "粉丝数", "数据/赞藏", "点赞", "收藏", "评论", "转发", "帖子数据", "RSVP人数", "电话", "博主状态", "付费金额", "备注", "提交人", "主页链接", "帖子链接", "更新时间"];
+      const header = ["信息类型", "状态", "取消原因", "是否作废隐藏", "是否重复", "是否高亮", "日期", "星期", "时间", "发帖日期", "平台", "博主账号", "名字", "粉丝数", "数据/赞藏", "点赞", "收藏", "评论", "转发", "帖子数据", "RSVP人数", "电话", "博主状态", "付费金额", "备注", "提交人", "主页链接", "帖子链接", "更新时间"];
       const rows = state.records.slice().sort(sortRecords).map((item) => [
-        item.type === "post" ? "发帖追踪" : "探店预约", normalizeStatus(item.status), isDuplicateRecord(item) ? "是" : "", isHighlighted(item) ? "是" : "", item.dateISO, item.weekday, item.timeText, item.postDateText || formatChineseDate(item.postPublishedAt), item.platform, item.handle, item.name, item.followers, item.engagement,
+        item.type === "post" ? "发帖追踪" : "探店预约", normalizeStatus(item.status), item.cancelReason || "", isArchivedRecord(item) ? "是" : "", isDuplicateRecord(item) ? "是" : "", isHighlighted(item) ? "是" : "", item.dateISO, item.weekday, item.timeText, item.postDateText || formatChineseDate(item.postPublishedAt), item.platform, item.handle, item.name, item.followers, item.engagement,
         item.postLikes, item.postCollects, item.postComments, item.postShares, item.postMetricsText, item.pax, item.phone, item.visitType, item.feeAmount, item.remarks, item.submitter || item.owner, item.link, item.postUrl, item.createdAt
       ]);
       const csv = [header, ...rows].map((row) => row.map(csvCell).join(",")).join("\n");

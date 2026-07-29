@@ -45,7 +45,23 @@ def normalize_status(value):
         return "已发布"
     if value == "取消":
         return "取消"
+    if value == "爽约":
+        return "爽约"
     return "新增"
+
+
+def is_archived_record(record):
+    return bool(
+        record
+        and (
+            record.get("archived")
+            or record.get("cancelReason") in {"填错", "改约"}
+        )
+    )
+
+
+def is_inactive_record(record):
+    return is_archived_record(record) or normalize_status(record.get("status")) in {"取消", "爽约"}
 
 
 def normalize_loose(value):
@@ -114,7 +130,7 @@ def post_identity(value):
 
 
 def duplicate_keys(record):
-    if not record or normalize_status(record.get("status")) == "取消":
+    if not record or is_inactive_record(record):
         return []
     keys = []
     post = post_identity(record.get("postUrl") or "")
@@ -158,7 +174,7 @@ def sort_minutes(value):
 
 
 def status_sort_rank(record):
-    return 1 if normalize_status(record.get("status")) == "已发布" else 0
+    return {"新增": 0, "取消": 1, "爽约": 2, "已发布": 3}.get(normalize_status(record.get("status")), 0)
 
 
 def is_invalid_draft(record):
@@ -277,7 +293,7 @@ def safe_records():
     return []
 
 
-records = [record for record in safe_records() if not is_invalid_draft(record)]
+records = [record for record in safe_records() if not is_invalid_draft(record) and not is_archived_record(record)]
 records = sorted(records, key=lambda r: (status_sort_rank(r), r.get("dateISO") or "9999-99-99", sort_minutes(r.get("timeText"))))
 duplicate_set = duplicate_ids(records)
 
@@ -336,10 +352,11 @@ def draw_header(draw):
         ("新增", sum(1 for r in records if normalize_status(r.get("status")) == "新增")),
         ("已发布", sum(1 for r in records if normalize_status(r.get("status")) == "已发布")),
         ("取消", sum(1 for r in records if normalize_status(r.get("status")) == "取消")),
+        ("爽约", sum(1 for r in records if normalize_status(r.get("status")) == "爽约")),
         ("重复", len(duplicate_set)),
     ]
     x = M + 34
-    step = (PAGE_W - M * 2 - 68) / 5
+    step = (PAGE_W - M * 2 - 68) / 6
     for label, value in metrics:
         draw.text((x, y + 12), str(value), fill=BLACK, font=METRIC_FONT)
         draw.text((x, y + 54), label, fill=SOFT, font=METRIC_LABEL_FONT)
@@ -352,6 +369,8 @@ def row_fill(record):
     duplicate = str(record.get("id") or "") in duplicate_set
     if status == "取消":
         return RED_ROW
+    if status == "爽约":
+        return ORANGE_ROW
     if status == "已发布" and highlighted:
         return GREEN_ROW
     if highlighted:
@@ -375,10 +394,11 @@ def draw_record(draw, links, record, y):
     x1 = PAGE_W - M
     draw.rounded_rectangle((x0, y, x1, y + CARD_H), radius=18, fill=row_fill(record), outline=LINE, width=1)
 
-    status_color = PURPLE if status == "已发布" else RED if status == "取消" else GREEN
+    status_color = PURPLE if status == "已发布" else RED if status == "取消" else YELLOW if status == "爽约" else GREEN
     draw.text((x0 + 24, y + 24), record.get("timeText") or "--", fill=BLACK, font=NAME_FONT)
     draw.text((x0 + 24, y + 60), f"{record.get('pax') or '?'} pax", fill=SOFT, font=BODY_FONT)
-    draw_chip(draw, x0 + 24, y + 94, status, "#e8f3ec" if status == "新增" else "#ececff" if status == "已发布" else "#ffe8ea", status_color, CHIP_FONT)
+    chip_fill = "#e8f3ec" if status == "新增" else "#ececff" if status == "已发布" else "#fff0d6" if status == "爽约" else "#ffe8ea"
+    draw_chip(draw, x0 + 24, y + 94, status, chip_fill, status_color, CHIP_FONT)
     if duplicate:
         draw_chip(draw, x0 + 94, y + 94, "重复", "#fff0d6", YELLOW, CHIP_FONT)
 
@@ -396,6 +416,7 @@ def draw_record(draw, links, record, y):
         f"发帖 {record.get('postDateText')}" if record.get("postDateText") else "",
         payment_text(record),
         f"电话 {record.get('phone')}" if record.get("phone") else "",
+        f"处理原因 {record.get('cancelReason')}" if record.get("cancelReason") else "",
     ]
     if duplicate:
         line_one.insert(0, "重复博主")

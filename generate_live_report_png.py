@@ -37,7 +37,23 @@ def normalize_status(value):
         return "已发布"
     if value == "取消":
         return "取消"
+    if value == "爽约":
+        return "爽约"
     return "新增"
+
+
+def is_archived_record(record):
+    return bool(
+        record
+        and (
+            record.get("archived")
+            or record.get("cancelReason") in {"填错", "改约"}
+        )
+    )
+
+
+def is_inactive_record(record):
+    return is_archived_record(record) or normalize_status(record.get("status")) in {"取消", "爽约"}
 
 
 def normalize_loose(value):
@@ -106,7 +122,7 @@ def post_identity(value):
 
 
 def duplicate_keys(record):
-    if not record or normalize_status(record.get("status")) == "取消":
+    if not record or is_inactive_record(record):
         return []
     keys = []
     post = post_identity(record.get("postUrl") or "")
@@ -150,7 +166,7 @@ def sort_minutes(value):
 
 
 def status_sort_rank(record):
-    return 1 if normalize_status(record.get("status")) == "已发布" else 0
+    return {"新增": 0, "取消": 1, "爽约": 2, "已发布": 3}.get(normalize_status(record.get("status")), 0)
 
 
 def is_invalid_draft(record):
@@ -268,7 +284,7 @@ try:
 except Exception:
     records = []
 
-records = [record for record in records if not is_invalid_draft(record)]
+records = [record for record in records if not is_invalid_draft(record) and not is_archived_record(record)]
 records = sorted(records, key=lambda r: (status_sort_rank(r), r.get("dateISO") or "9999-99-99", sort_minutes(r.get("timeText"))))
 DUPLICATE_IDS = duplicate_ids(records)
 
@@ -318,13 +334,14 @@ metrics = [
     ("新增", str(sum(1 for r in records if normalize_status(r.get("status")) == "新增"))),
     ("已发布", str(sum(1 for r in records if normalize_status(r.get("status")) == "已发布"))),
     ("取消", str(sum(1 for r in records if normalize_status(r.get("status")) == "取消"))),
+    ("爽约", str(sum(1 for r in records if normalize_status(r.get("status")) == "爽约"))),
     ("本次高亮", str(sum(1 for r in records if is_highlighted(r)))),
 ]
 mx = 110
 for label, value in metrics:
     d.text((mx, 198), value, fill=black, font=font(36, True))
     d.text((mx, 244), label, fill=muted, font=small_f)
-    mx += 445
+    mx += 370
 
 cols = [
     ("状态", 90),
@@ -366,6 +383,8 @@ for record in records:
         fill = green_row
     elif status == "取消":
         fill = red_row
+    elif status == "爽约":
+        fill = orange_row
     elif highlighted:
         fill = blue_row
     elif duplicate:
@@ -389,7 +408,7 @@ for record in records:
         payment_text(record) or "待补",
         record.get("postDateText") or "-",
         link_status(record),
-        record.get("remarks") or "",
+        " / ".join([item for item in [record.get("cancelReason") or "", record.get("remarks") or ""] if item]),
     ]
 
     x = x0 + 18
@@ -397,6 +416,8 @@ for record in records:
         color = black
         if value == "取消":
             color = red
+        elif value == "爽约":
+            color = "#a86f00"
         elif "已发布" in str(value):
             color = purple
         elif "查看" in str(value):
@@ -416,7 +437,7 @@ for record in records:
     y += row_h
 
 d.rounded_rectangle((70, H - 160, 2410, H - 72), radius=22, fill=header_bg)
-d.text((102, H - 133), "颜色说明：浅蓝=本次新增预约｜浅绿=本次发帖更新｜浅红=取消但保留记录｜浅橙=重复博主。", fill=muted, font=small_f)
+d.text((102, H - 133), "颜色说明：浅蓝=本次新增预约｜浅绿=本次发帖更新｜浅红=取消｜浅橙=爽约或重复。填错/改约不会进入报表。", fill=muted, font=small_f)
 d.text((70, H - 40), "后台保留完整数据；这张 PNG 用来给手机和电脑快速看全局。", fill=muted, font=tiny_f)
 
 OUT.parent.mkdir(parents=True, exist_ok=True)
