@@ -1147,6 +1147,7 @@
       if (!state.editingId && enriched.type === "post" && enriched.ok !== false) {
         const matched = await findMatchingBooking(enriched);
         if (!matched) {
+          if (blockUnmatchedXhsPost(enriched)) return;
           state.pendingPostRecord = enriched;
           state.pendingRecord = null;
           statusLine.textContent = "平台没有给出明确作者，也没有自动匹配到原预约，请选择这条帖子要更新到哪位博主";
@@ -1427,6 +1428,7 @@
       const matched = currentBooking || await findMatchingBooking(sourcePost);
       state.pendingSourcePostId = String(existingPost.id || "");
       if (!matched) {
+        if (blockUnmatchedXhsPost(sourcePost)) return true;
         state.pendingPostRecord = sourcePost;
         state.pendingRecord = null;
         statusLine.textContent = "这篇帖子已经保存过，但还没有关联预约。请选择对应的有效预约，系统会合并记录。";
@@ -1443,11 +1445,35 @@
       return true;
     }
 
+    function blockUnmatchedXhsPost(postRecord) {
+      if (normalizeIdentity(postRecord?.platform) !== normalizeIdentity("小红书")) return false;
+      state.pendingRecord = null;
+      state.pendingPostRecord = null;
+      state.pendingSourcePostId = "";
+      reviewPanel.classList.add("hidden");
+      const profile = canonicalCreatorProfileUrl(postRecord.link || postRecord.profileUrl || "");
+      const creator = displayCreatorName(postRecord);
+      statusLine.textContent = profile || creator !== "未识别账号"
+        ? `已识别帖子作者 ${creator}，但后台没有这位作者的有效预约，本次没有保存。`
+        : "这条小红书链接没有返回作者主页 ID，本次没有保存。请从帖子右上角“分享”重新复制完整链接后再试。";
+      showToast("没有自动匹配，未保存");
+      return true;
+    }
+
     function getPostMatchCandidates() {
+      const selectedDate = dateFilter?.value || "";
       return state.records.filter((item) => {
         if (item.id === state.editingId || isInactiveRecord(item)) return false;
         if (item.type === "post") return false;
+        if (normalizeStatus(item.status) !== "新增" || item.postUrl) return false;
         return true;
+      }).sort((a, b) => {
+        const aSelected = selectedDate && a.dateISO === selectedDate ? 1 : 0;
+        const bSelected = selectedDate && b.dateISO === selectedDate ? 1 : 0;
+        if (aSelected !== bSelected) return bSelected - aSelected;
+        const dateCompare = String(b.dateISO || "").localeCompare(String(a.dateISO || ""));
+        if (dateCompare) return dateCompare;
+        return String(a.timeText || "").localeCompare(String(b.timeText || ""));
       });
     }
 
@@ -1545,7 +1571,7 @@
       reviewPanel.innerHTML = `<div class="review-head">
         <div>
           <h2>选择原预约</h2>
-          <p>Instagram 没有公开返回这条帖子的作者账号，请选择它对应的预约，系统会更新在同一条记录里。</p>
+          <p>平台没有公开返回这条帖子的作者账号，请选择它对应的预约，系统会更新在同一条记录里。</p>
         </div>
         <span class="chip 已发布">已发布</span>
       </div>

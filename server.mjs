@@ -820,6 +820,39 @@ async function resolveProfile(target) {
 
   try {
     const requestedUrl = canonicalRecordWebUrl(target) || target;
+    if (/rednote\.com/i.test(requestedUrl) && /\/explore\/[^/?#]+/i.test(requestedUrl)) {
+      const rednotePost = await fetchRednotePostFallback(requestedUrl, requestedUrl);
+      if (rednotePost.name || rednotePost.postTitle) {
+        return {
+          ok: true,
+          finalUrl: requestedUrl,
+          profileUrl: rednotePost.profileUrl || "",
+          postUrl: requestedUrl,
+          platform: "小红书",
+          handle: rednotePost.handle || "",
+          name: rednotePost.name || "",
+          followers: "",
+          engagement: "",
+          following: "",
+          postCount: "",
+          postLikes: rednotePost.postLikes || "",
+          postCollects: rednotePost.postCollects || "",
+          postComments: rednotePost.postComments || "",
+          postShares: rednotePost.postShares || "",
+          postMetricsText: rednotePost.postMetricsText || "",
+          redId: "",
+          description: rednotePost.description || "",
+          postTitle: rednotePost.postTitle || "",
+          publishedAt: rednotePost.publishedAt || "",
+          sourceTitle: rednotePost.sourceTitle || ""
+        };
+      }
+      return {
+        ok: false,
+        finalUrl: requestedUrl,
+        message: "RedNote 没有返回这篇帖子的公开作者资料。请重新复制一次带 xsec_token 的分享链接。"
+      };
+    }
     if (/instagram\.com|instagr\.am/i.test(requestedUrl) && apifyToken) {
       const apify = await fetchApifyInstagram(requestedUrl).catch((error) => ({ ok: false, message: error.message || String(error) }));
       if (apify.ok) return apify;
@@ -827,6 +860,8 @@ async function resolveProfile(target) {
     const page = await fetchPage(requestedUrl);
     const finalUrl = page.finalUrl || requestedUrl;
     const instagramJson = await fetchInstagramProfileJson(requestedUrl, finalUrl);
+    const isRequestedXhsPost = /xiaohongshu\.com|xhslink\.com/i.test(`${requestedUrl} ${finalUrl}`)
+      && /\/explore\/|\/discovery\/item|note/i.test(`${requestedUrl} ${finalUrl}`);
     if (page.status >= 400) {
       if (instagramJson.name || instagramJson.followers || instagramJson.engagement) {
         return {
@@ -853,6 +888,34 @@ async function resolveProfile(target) {
           sourceTitle: ""
         };
       }
+      if (isRequestedXhsPost) {
+        const rednotePost = await fetchRednotePostFallback(finalUrl, requestedUrl);
+        if (rednotePost.name || rednotePost.postTitle) {
+          return {
+            ok: true,
+            finalUrl,
+            profileUrl: rednotePost.profileUrl || "",
+            postUrl: canonicalRecordPostUrl(finalUrl) || canonicalRecordPostUrl(requestedUrl) || finalUrl,
+            platform: "小红书",
+            handle: rednotePost.handle || "",
+            name: rednotePost.name || "",
+            followers: "",
+            engagement: "",
+            following: "",
+            postCount: "",
+            postLikes: rednotePost.postLikes || "",
+            postCollects: rednotePost.postCollects || "",
+            postComments: rednotePost.postComments || "",
+            postShares: rednotePost.postShares || "",
+            postMetricsText: rednotePost.postMetricsText || "",
+            redId: "",
+            description: rednotePost.description || "",
+            postTitle: rednotePost.postTitle || "",
+            publishedAt: rednotePost.publishedAt || "",
+            sourceTitle: rednotePost.sourceTitle || ""
+          };
+        }
+      }
       return {
         ok: false,
         finalUrl,
@@ -866,39 +929,51 @@ async function resolveProfile(target) {
     const xhsVisible = parseXhsVisibleProfile(html, meta);
     const xhsPost = parseXhsPost(html, meta, finalUrl);
     const instagram = parseInstagramMeta(meta, html, finalUrl);
-    const isXhs = /xiaohongshu\.com|xhslink\.com/i.test(finalUrl);
+    const isXhs = /xiaohongshu\.com|xhslink\.com/i.test(`${finalUrl} ${requestedUrl}`);
+    const isXhsPost = isRequestedXhsPost;
     const isInstagramPost = /instagram\.com|instagr\.am/i.test(finalUrl) && /\/(?:p|reel|reels)\//i.test(finalUrl);
-    const publishedAt = instagram.publishedAt || xhsPost.publishedAt || (isXhs ? "" : parsePublishedAt(html, meta));
+    const rednotePost = isXhsPost && !xhsPost.profileUrl
+      ? await fetchRednotePostFallback(finalUrl, requestedUrl)
+      : {};
+    const publishedAt = instagram.publishedAt || xhsPost.publishedAt || rednotePost.publishedAt || (isXhs ? "" : parsePublishedAt(html, meta));
     const combined = [meta.title, meta.description, meta.ogTitle, meta.ogDescription, stripTags(html).slice(0, 3000)].filter(Boolean).join("\n");
     const parsed = parseSharedText(combined, finalUrl);
     const titleName = cleanXhsTitle(meta.title || meta.ogTitle || "");
+    const resolvedXhsName = firstUsableXhsCreatorName([
+      rednotePost.name,
+      xhsPost.name,
+      ssr.name,
+      xhsVisible.name,
+      parsed.name,
+      isXhsPost ? "" : titleName
+    ]);
     const requestedProfileUrl = canonicalRecordCreatorUrl(requestedUrl);
     const resolvedProfileUrl = canonicalRecordCreatorUrl(
-      instagramJson.profileUrl || instagram.profileUrl || xhsPost.profileUrl || (isInstagramPost ? "" : parsed.profileUrl) || ""
+      instagramJson.profileUrl || instagram.profileUrl || xhsPost.profileUrl || rednotePost.profileUrl || (isInstagramPost ? "" : parsed.profileUrl) || ""
     );
 
     return {
       ok: true,
       finalUrl,
       profileUrl: resolvedProfileUrl || requestedProfileUrl,
-      postUrl: instagram.postUrl || xhsPost.postUrl || parsed.postUrl || "",
+      postUrl: instagram.postUrl || xhsPost.postUrl || canonicalRecordPostUrl(requestedUrl) || parsed.postUrl || rednotePost.postUrl || "",
       platform: instagramJson.platform || instagram.platform || parsed.platform,
-      handle: instagramJson.handle || instagram.handle || xhsPost.handle || (isInstagramPost ? "" : parsed.handle),
-      name: instagramJson.name || instagram.name || xhsPost.name || ssr.name || xhsVisible.name || parsed.name || titleName,
+      handle: instagramJson.handle || instagram.handle || xhsPost.handle || rednotePost.handle || (isInstagramPost ? "" : parsed.handle),
+      name: instagramJson.name || instagram.name || resolvedXhsName,
       followers: instagramJson.followers || instagram.followers || xhsVisible.followers || ssr.followers || (parsed.followers && parsed.followers !== "1" ? parsed.followers : ""),
       engagement: instagramJson.engagement || instagram.engagement || ssr.engagement || parsed.engagement,
       following: instagramJson.following || instagram.following || xhsVisible.following || "",
       postCount: instagramJson.postCount || instagram.postCount || "",
-      postLikes: xhsPost.postLikes || instagram.postLikes || "",
-      postCollects: xhsPost.postCollects || "",
-      postComments: xhsPost.postComments || instagram.postComments || "",
-      postShares: xhsPost.postShares || "",
-      postMetricsText: xhsPost.postMetricsText || instagram.postMetricsText || "",
+      postLikes: xhsPost.postLikes || rednotePost.postLikes || instagram.postLikes || "",
+      postCollects: xhsPost.postCollects || rednotePost.postCollects || "",
+      postComments: xhsPost.postComments || rednotePost.postComments || instagram.postComments || "",
+      postShares: xhsPost.postShares || rednotePost.postShares || "",
+      postMetricsText: xhsPost.postMetricsText || rednotePost.postMetricsText || instagram.postMetricsText || "",
       redId: xhsVisible.redId || ssr.redId || "",
-      description: instagramJson.description || instagram.description || xhsPost.description || ssr.description || "",
-      postTitle: instagram.postTitle || xhsPost.postTitle || parsed.postTitle,
+      description: instagramJson.description || instagram.description || xhsPost.description || rednotePost.description || ssr.description || "",
+      postTitle: instagram.postTitle || xhsPost.postTitle || rednotePost.postTitle || parsed.postTitle,
       publishedAt,
-      sourceTitle: meta.title || meta.ogTitle || ""
+      sourceTitle: meta.title || meta.ogTitle || rednotePost.sourceTitle || ""
     };
   } catch (error) {
     return { ok: false, message: `打开网页失败：${error.message || error}` };
@@ -978,6 +1053,30 @@ async function fetchPage(target) {
     };
   } catch {
     return fetchPageWithCurl(target);
+  }
+}
+
+async function fetchRednotePostFallback(finalUrl, requestedUrl = "") {
+  const source = [finalUrl, requestedUrl].find((value) => /\/(?:explore|discovery\/item)\/[^/?#]+/i.test(String(value || ""))) || "";
+  const noteId = decodeURIComponent(source.match(/\/(?:explore|discovery\/item)\/([^/?#]+)/i)?.[1] || "");
+  if (!noteId) return {};
+
+  try {
+    const sourceUrl = new URL(source);
+    const rednoteUrl = new URL(`https://www.rednote.com/explore/${encodeURIComponent(noteId)}`);
+    const token = sourceUrl.searchParams.get("xsec_token") || "";
+    if (token) rednoteUrl.searchParams.set("xsec_token", token);
+    const page = await fetchPageWithCurl(rednoteUrl.href, {
+      compressed: true,
+      cookies: true,
+      maxTime: 10,
+      noCache: true,
+      referer: "https://www.rednote.com/"
+    });
+    if (page.status >= 400 || !page.html) return {};
+    return parseRednotePost(page.html, page.finalUrl || rednoteUrl.href, noteId);
+  } catch {
+    return {};
   }
 }
 
@@ -1312,8 +1411,7 @@ function parseXhsPost(html, meta, finalUrl) {
   const postTitle = cleanXhsTitle(meta.ogTitle || meta.title || "");
   const name = read(/"user":\{[\s\S]{0,800}?"nickname":"((?:\\.|[^"])*)"/)
     || read(/"author":\{[\s\S]{0,800}?"nickname":"((?:\\.|[^"])*)"/)
-    || read(/"nickname":"((?:\\.|[^"])*)","avatar"/)
-    || postTitle.split(/[｜|-]/)[0].trim();
+    || read(/"nickname":"((?:\\.|[^"])*)","avatar"/);
   const userId = read(/"user":\{[\s\S]{0,800}?"userId":"([^"]+)"/)
     || read(/"author":\{[\s\S]{0,800}?"userId":"([^"]+)"/);
     const noteId = decodeURIComponent(finalUrl.match(/\/(?:explore|discovery\/item)\/([^/?#]+)/i)?.[1] || "");
@@ -1329,6 +1427,94 @@ function parseXhsPost(html, meta, finalUrl) {
     ...counts,
     description: meta.description || meta.ogDescription || ""
   };
+}
+
+function firstUsableXhsCreatorName(values) {
+  for (const value of values || []) {
+    const name = String(value || "").trim();
+    const compact = name.replace(/\s+/g, "").toLowerCase();
+    if (!compact) continue;
+    if (/^(?:小红书)+$|^(?:rednote|red|登录|注册|发现|explore)$/i.test(compact)) continue;
+    return name;
+  }
+  return "";
+}
+
+function parseRednotePost(html, finalUrl, noteId = "") {
+  const scripts = Array.from(String(html || "").matchAll(
+    /<script\b[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi
+  ));
+  const articles = [];
+  for (const match of scripts) {
+    try {
+      const parsed = JSON.parse(decodeEntities(match[1]).trim());
+      const values = Array.isArray(parsed) ? parsed : [parsed];
+      for (const value of values) {
+        if (Array.isArray(value?.["@graph"])) articles.push(...value["@graph"]);
+        else articles.push(value);
+      }
+    } catch {}
+  }
+
+  const article = articles.find((item) => {
+    if (!item || !/article/i.test(String(item["@type"] || ""))) return false;
+    const pageId = String(item.mainEntityOfPage?.["@id"] || item.url || "");
+    return !noteId || !pageId || pageId.includes(noteId);
+  }) || articles.find((item) => /article/i.test(String(item?.["@type"] || ""))) || {};
+
+  const author = Array.isArray(article.author) ? article.author[0] : article.author;
+  const name = firstUsableXhsCreatorName([
+    typeof author === "string" ? author : author?.name
+  ]);
+  const profileUrl = canonicalRecordCreatorUrl(
+    (typeof author === "object" ? (author?.url || author?.sameAs || "") : "")
+      || findRednoteAuthorProfileUrl(html, name)
+  );
+  const postLikes = readMetaContent(html, "og:xhs:note_like");
+  const postCollects = readMetaContent(html, "og:xhs:note_collect");
+  const postComments = readMetaContent(html, "og:xhs:note_comment");
+  const postShares = readMetaContent(html, "og:xhs:note_share");
+  return {
+    name,
+    handle: "",
+    profileUrl,
+    postUrl: finalUrl,
+    postTitle: cleanXhsTitle(String(article.headline || "")).replace(/\s*-\s*rednote\s*$/i, ""),
+    publishedAt: "",
+    postLikes,
+    postCollects,
+    postComments,
+    postShares,
+    postMetricsText: [
+      postLikes ? `点赞 ${postLikes}` : "",
+      postCollects ? `收藏 ${postCollects}` : "",
+      postComments ? `评论 ${postComments}` : "",
+      postShares ? `转发 ${postShares}` : ""
+    ].filter(Boolean).join(" · "),
+    description: String(article.description || ""),
+    sourceTitle: String(article.headline || "")
+  };
+}
+
+function findRednoteAuthorProfileUrl(html, authorName) {
+  const name = String(authorName || "").trim();
+  if (!name) return "";
+  const source = String(html || "");
+  const links = source.matchAll(/href=["'](?:https?:\/\/(?:www\.)?rednote\.com)?\/user\/profile\/([^"'/?#]+)[^"']*["']/gi);
+  for (const match of links) {
+    const nearby = decodeEntities(stripTags(source.slice(match.index || 0, (match.index || 0) + 1200)))
+      .replace(/\s+/g, " ");
+    if (!nearby.includes(name)) continue;
+    return `https://www.xiaohongshu.com/user/profile/${decodeURIComponent(match[1])}`;
+  }
+  return "";
+}
+
+function readMetaContent(html, name) {
+  const escaped = String(name || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const first = new RegExp(`<meta[^>]+(?:name|property)=["']${escaped}["'][^>]+content=["']([^"']*)["'][^>]*>`, "i");
+  const second = new RegExp(`<meta[^>]+content=["']([^"']*)["'][^>]+(?:name|property)=["']${escaped}["'][^>]*>`, "i");
+  return normalizeSocialCount(decodeEntities(html.match(first)?.[1] || html.match(second)?.[1] || ""));
 }
 
 function parseXhsPostCounts(html) {
