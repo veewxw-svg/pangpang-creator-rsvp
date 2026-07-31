@@ -1045,11 +1045,20 @@
   </div>
   <div class="toast" id="toast"></div>
 
-  <script>
+  <script type="module">
+    import {
+      creatorIdentityKey,
+      postIdentityKey,
+      sameCreatorIdentity,
+      selectBestCreatorMatch,
+      withPreservedSocialIdentity,
+      withSocialIdentity
+    } from "./social-identity.mjs";
+
     const KEY = "pangpang_kol_bookings_v1";
     const weekdays = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
     const state = {
-      records: loadRecords(),
+      records: loadRecords().map(withSocialIdentity),
       pendingRecord: null,
       pendingPostRecord: null,
       pendingSourcePostId: "",
@@ -1100,7 +1109,7 @@
       statusLine.textContent = state.editingId ? "正在更新这条记录..." : "正在打开链接识别博主信息...";
       const existing = state.editingId ? state.records.find((item) => item.id === state.editingId) : null;
       const draft = buildRecord(false);
-      const record = existing
+      const record = withSocialIdentity(existing
         ? {
             ...existing,
             ...draft,
@@ -1130,7 +1139,7 @@
             visitType: draft.visitType || existing.visitType || "",
             feeAmount: draft.feeAmount || existing.feeAmount || ""
           }
-        : draft;
+        : draft);
       const earlyDuplicate = findDuplicateRecord(record, state.records, state.editingId);
       if (earlyDuplicate) {
         if (await prepareDuplicatePostMerge(record, earlyDuplicate)) return;
@@ -1229,9 +1238,9 @@
       if (action === "save" && state.pendingRecord) {
         applyReviewEdits();
         const editingId = state.editingId;
-        const record = editingId
+        let record = withSocialIdentity(editingId
           ? { ...state.pendingRecord, id: editingId, createdAt: new Date().toISOString(), highlightUntil: Date.now() + 72 * 60 * 60 * 1000 }
-          : { ...state.pendingRecord, id: String(Date.now()), createdAt: new Date().toISOString(), highlightUntil: Date.now() + 72 * 60 * 60 * 1000 };
+          : { ...state.pendingRecord, id: String(Date.now()), createdAt: new Date().toISOString(), highlightUntil: Date.now() + 72 * 60 * 60 * 1000 });
         record.status = record.postUrl || record.type === "post" ? "已发布" : normalizeStatus(record.status);
         const sourcePostId = state.pendingSourcePostId;
         const duplicate = findDuplicateRecord(record, state.records, [editingId, sourcePostId]);
@@ -1279,7 +1288,7 @@
       const profile = parseProfile(profileText.value);
       const booking = state.mode === "post" ? {} : parseBooking(bookingText.value);
       const remarkText = mergeBookingRemarks(remarks.value.trim(), booking.partyText);
-      return {
+      return withSocialIdentity({
         id: withId ? String(Date.now()) : "draft",
         createdAt: new Date().toISOString(),
         type: state.mode,
@@ -1308,7 +1317,7 @@
         visitType: state.mode === "post" ? "" : visitType.value,
         feeAmount: state.mode === "post" || visitType.value !== "付费探店" ? "" : feeAmount.value.trim(),
         remarks: remarkText
-      };
+      });
     }
 
     function setMode(mode) {
@@ -1361,26 +1370,38 @@
     async function findMatchingBooking(postRecord) {
       const candidates = getPostMatchCandidates();
       const directMatches = candidates.filter((item) => sameCreator(item, postRecord));
-      if (directMatches.length === 1) return directMatches[0];
-      if (directMatches.length > 1) return null;
+      const directMatch = selectBestCreatorMatch(directMatches, postRecord, {
+        selectedDate: dateFilter?.value || "",
+        todayISO: localTodayISO()
+      });
+      if (directMatch) return directMatch;
 
       if (postRecord.platform !== "Instagram" || !normalizeIdentity(postRecord.name)) return null;
       statusLine.textContent = "帖子没有给出作者账号，正在用已有预约主页自动匹配...";
 
+      const resolvedMatches = [];
       for (const item of candidates) {
         if (item.platform !== "Instagram" || !item.link) continue;
         const resolved = await resolveProfileUrl(item.link);
         if (!resolved.ok) continue;
         const candidate = mergeResolvedProfileForMatch(item, resolved);
-        if (sameCreator(candidate, postRecord)) return item;
+        if (sameCreator(candidate, postRecord)) resolvedMatches.push(item);
       }
-      return null;
+      return selectBestCreatorMatch(resolvedMatches, postRecord, {
+        selectedDate: dateFilter?.value || "",
+        todayISO: localTodayISO()
+      });
+    }
+
+    function localTodayISO() {
+      const now = new Date();
+      return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
     }
 
     function mergeDuplicatePostData(existingPost, incomingPost) {
       const incoming = incomingPost || {};
       const existing = existingPost || {};
-      return {
+      return withSocialIdentity({
         ...incoming,
         ...existing,
         postUrl: existing.postUrl || incoming.postUrl || incoming.link || "",
@@ -1403,7 +1424,7 @@
         remarks: incoming.remarks || existing.remarks || "",
         type: "post",
         status: "已发布"
-      };
+      });
     }
 
     async function prepareDuplicatePostMerge(incomingPost, existingPost) {
@@ -1478,30 +1499,24 @@
     }
 
     function sameCreator(a, b) {
-      const handleA = normalizeIdentity(a.handle);
-      const handleB = normalizeIdentity(b.handle);
-      if (handleA && handleB && handleA === handleB) return true;
-      const nameA = normalizeIdentity(a.name);
-      const nameB = normalizeIdentity(b.name);
-      if (nameA && nameB && nameA === nameB) return true;
-      const linkA = normalizeProfileLink(canonicalCreatorProfileUrl(a.link || a.profileUrl || ""));
-      const linkB = normalizeProfileLink(canonicalCreatorProfileUrl(b.link || b.profileUrl || ""));
-      return Boolean(linkA && linkB && linkA === linkB);
+      return sameCreatorIdentity(a, b);
     }
 
     function mergeResolvedProfileForMatch(record, resolved) {
       const handleName = normalizeIdentity(record.handle);
       const currentName = normalizeIdentity(record.name);
       const shouldUseResolvedName = !record.name || currentName === handleName;
-      return {
+      return withSocialIdentity({
         ...record,
         platform: resolved.platform || record.platform,
         link: resolved.profileUrl || record.link,
         handle: resolved.handle || record.handle,
         name: shouldUseResolvedName ? (resolved.name || record.name) : record.name,
         followers: record.followers || resolved.followers || "",
-        engagement: record.engagement || resolved.engagement || ""
-      };
+        engagement: record.engagement || resolved.engagement || "",
+        creatorId: resolved.creatorId || record.creatorId || "",
+        postId: resolved.postId || record.postId || ""
+      });
     }
 
     function normalizeIdentity(value) {
@@ -1518,7 +1533,7 @@
     }
 
     function isXhsLink(value) {
-      return /xiaohongshu\.com|xhslink\.com/i.test(String(value || ""));
+      return /xiaohongshu\.com|xhslink\.(?:com|cn)|rnote\.com|rednote\.com/i.test(String(value || ""));
     }
 
     function formatChineseDate(value) {
@@ -1541,7 +1556,7 @@
     }
 
     function mergePostIntoBooking(booking, postRecord) {
-      return {
+      return withSocialIdentity({
         ...booking,
         platform: postRecord.platform || booking.platform,
         link: booking.link || postRecord.link,
@@ -1554,6 +1569,8 @@
         postComments: postRecord.postComments || booking.postComments || "",
         postShares: postRecord.postShares || booking.postShares || "",
         postMetricsText: postRecord.postMetricsText || booking.postMetricsText || "",
+        creatorId: booking.creatorId || postRecord.creatorId || "",
+        postId: postRecord.postId || booking.postId || "",
         handle: booking.handle || postRecord.handle || "",
         name: booking.name || postRecord.name || "",
         followers: postRecord.followers || booking.followers || "",
@@ -1562,7 +1579,7 @@
         remarks: postRecord.remarks || booking.remarks || "",
         resolveStatus: "已匹配原预约",
         resolveMessage: "已找到原预约，会更新在同一条记录里，请确认后保存"
-      };
+      });
     }
 
     function renderPostMatchChooser(postRecord) {
@@ -1618,7 +1635,7 @@
         };
       }
 
-      const merged = {
+      const merged = withSocialIdentity({
         ...record,
         platform: resolved.platform || record.platform,
         link: canonicalCreatorProfileUrl(resolved.profileUrl) || canonicalWebUrl(record.link),
@@ -1638,11 +1655,15 @@
         postComments: resolved.postComments || record.postComments || "",
         postShares: resolved.postShares || record.postShares || "",
         postMetricsText: resolved.postMetricsText || record.postMetricsText || "",
+        creatorId: resolved.creatorId || record.creatorId || "",
+        postId: resolved.postId || record.postId || "",
+        canonicalProfileUrl: resolved.canonicalProfileUrl || record.canonicalProfileUrl || "",
+        canonicalPostUrl: resolved.canonicalPostUrl || record.canonicalPostUrl || "",
         resolveStatus: "已自动识别",
         resolveMessage: resolved.name || resolved.handle
           ? "已打开链接并自动识别信息，请确认后保存"
           : "主页链接已保留，但平台没有公开返回博主名字；请手动填写名字后保存"
-      };
+      });
       return merged;
     }
 
@@ -1687,9 +1708,12 @@
           }
           return;
         }
-        const serverRecords = data.records.filter((record) => !isInvalidDraftRecord(record));
+        const serverRecords = data.records
+          .filter((record) => !isInvalidDraftRecord(record))
+          .map(withSocialIdentity);
         state.records = (isDatabaseStorage ? serverRecords : mergeRecordLists(state.records, serverRecords))
-          .filter((record) => !isInvalidDraftRecord(record));
+          .filter((record) => !isInvalidDraftRecord(record))
+          .map(withSocialIdentity);
         localStorage.setItem(KEY, JSON.stringify(state.records));
         if (!isDatabaseStorage && state.records.length !== serverRecords.length) {
           await saveRecords({ silent: true });
@@ -1711,6 +1735,10 @@
         const resolved = await resolveProfileUrl(record.postUrl);
         if (!resolved.ok) continue;
         const updates = {
+          creatorId: resolved.creatorId || record.creatorId || "",
+          postId: resolved.postId || record.postId || "",
+          canonicalProfileUrl: resolved.canonicalProfileUrl || record.canonicalProfileUrl || "",
+          canonicalPostUrl: resolved.canonicalPostUrl || record.canonicalPostUrl || "",
           postLikes: resolved.postLikes || record.postLikes || "",
           postCollects: resolved.postCollects || record.postCollects || "",
           postComments: resolved.postComments || record.postComments || "",
@@ -1748,7 +1776,7 @@
       const link = canonicalWebUrl(detectedLink);
       const lower = raw.toLowerCase();
       let platform = "";
-      if (/小红书|xiaohongshu|xhs|rednote|xhslink/.test(lower) || /xiaohongshu|xhslink/.test(link)) platform = "小红书";
+      if (/小红书|xiaohongshu|xhs|rednote|rnote|xhslink/.test(lower) || /xiaohongshu|xhslink|rednote|rnote/.test(link)) platform = "小红书";
       else if (/instagram|instagr\.am|ig\b/.test(lower)) platform = "Instagram";
       else if (/tiktok|douyin|抖音/.test(lower)) platform = /douyin|抖音/.test(lower) ? "抖音" : "TikTok";
       else if (/facebook|fb\.com/.test(lower)) platform = "Facebook";
@@ -2274,10 +2302,10 @@
     function duplicateKeys(record) {
       if (!record || isInactiveRecord(record)) return [];
       const keys = [];
-      const post = canonicalUrlIdentity(canonicalPostUrl(record.postUrl || ""));
+      const post = postIdentityKey(record);
       if (post) keys.push(`post:${post}`);
 
-      const creator = creatorDuplicateIdentity(record);
+      const creator = creatorIdentityKey(record);
       const date = normalizeLooseText(record.dateISO || record.dateText || "");
       const time = normalizeLooseText(record.timeText || "");
       if (creator && record.type !== "post" && date && time) {
@@ -2297,13 +2325,7 @@
     }
 
     function creatorDuplicateIdentity(record) {
-      const profile = canonicalUrlIdentity(canonicalCreatorProfileUrl(record.link || record.profileUrl || ""));
-      if (profile) return `url:${profile}`;
-      const platform = normalizeLooseText(record.platform || "");
-      const handle = normalizeLooseText(record.handle || "").replace(/^@/, "");
-      if (platform && handle) return `handle:${platform}:${handle}`;
-      const name = normalizeLooseText(record.name || "");
-      return platform && name ? `name:${platform}:${name}` : "";
+      return creatorIdentityKey(record);
     }
 
     function canonicalWebUrl(value) {
@@ -2338,7 +2360,7 @@
       const url = new URL(safe);
       const host = url.hostname.replace(/^www\./, "").toLowerCase();
       const path = url.pathname.replace(/\/+$/, "");
-      if (/xiaohongshu\.com$/.test(host) && /^\/user\/profile\/[^/]+$/i.test(path)) return safe;
+      if (/(?:xiaohongshu|rednote|rnote)\.com$/.test(host) && /^\/user\/profile\/[^/]+$/i.test(path)) return safe;
       if (/instagram\.com$/.test(host)) {
         const segment = path.split("/").filter(Boolean)[0] || "";
         if (segment && !["p", "reel", "reels", "explore", "accounts", "direct", "stories", "share"].includes(segment.toLowerCase())) {
@@ -2357,7 +2379,7 @@
       const host = url.hostname.replace(/^www\./, "").toLowerCase();
       const path = url.pathname.replace(/\/+$/, "");
       if (/xiaohongshu\.com$/.test(host) && /^\/(?:explore|discovery\/item)\/[^/]+$/i.test(path)) return safe;
-      if (/xhslink\.com$/.test(host) && path) return safe;
+      if (/xhslink\.(?:com|cn)$/.test(host) && path) return safe;
       if (/instagram\.com$/.test(host) && /^\/(?:p|reel|reels)\/[^/]+$/i.test(path)) return safe;
       if (/tiktok\.com$/.test(host) && /\/video\/[^/]+$/i.test(path)) return safe;
       return "";
@@ -2411,7 +2433,8 @@
       const message = serverMessage || `重复提醒：${creator}${schedule ? ` · ${schedule}` : ""} 的相同记录已经存在，本次没有重复保存。`;
       statusLine.textContent = message;
       reviewPanel.classList.add("hidden");
-      showToast("重复信息，未保存");
+      const isPublishedPost = record?.type === "post" && normalizeStatus(existing?.status) === "已发布";
+      showToast(isPublishedPost ? "已经是已发布，无需重复保存" : record?.type === "post" ? "帖子已记录，未重复保存" : "重复预约，未保存");
       if (existing?.id) scrollToRecord(existing.id);
     }
 
@@ -2736,9 +2759,18 @@
       const bUpdated = Number(b.highlightUntil || 0) || Date.parse(b.createdAt || "") || 0;
       const aScore = recordCompletenessScore(a);
       const bScore = recordCompletenessScore(b);
-      if (bUpdated > aUpdated && bScore >= aScore - 1) return b;
-      if (aUpdated > bUpdated && aScore >= bScore - 1) return a;
-      return bScore >= aScore ? b : a;
+      let preferred = bScore >= aScore ? b : a;
+      let fallback = preferred === a ? b : a;
+      if (bUpdated > aUpdated && bScore >= aScore - 1) {
+        preferred = b;
+        fallback = a;
+      } else if (aUpdated > bUpdated && aScore >= bScore - 1) {
+        preferred = a;
+        fallback = b;
+      }
+      return withPreservedSocialIdentity({
+        ...preferred,
+      }, fallback);
     }
 
     function recordCompletenessScore(record) {

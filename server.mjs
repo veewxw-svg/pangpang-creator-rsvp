@@ -5,6 +5,13 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
+import {
+  SOCIAL_IDENTITY_VERSION,
+  creatorIdentityKey,
+  postIdentityKey,
+  withPreservedSocialIdentity,
+  withSocialIdentity
+} from "./social-identity.mjs";
 
 const root = fileURLToPath(new URL(".", import.meta.url));
 const port = Number(process.env.PORT || 8787);
@@ -30,10 +37,12 @@ const apifyInstagramActor = process.env.APIFY_IG_ACTOR || "apify/instagram-scrap
 let dbPoolPromise;
 let dbReadyPromise;
 let recordsWriteQueue = Promise.resolve();
+let identityBackfillPromise;
 
 const mime = {
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
+  ".mjs": "text/javascript; charset=utf-8",
   ".webmanifest": "application/manifest+json; charset=utf-8",
   ".json": "application/json; charset=utf-8",
   ".png": "image/png",
@@ -51,25 +60,30 @@ createServer(async (req, res) => {
     const url = new URL(req.url || "/", `http://${req.headers.host}`);
     if (url.pathname === "/api/resolve-profile") {
       const target = url.searchParams.get("url") || "";
-      const payload = await resolveProfile(target);
+      const payload = withSocialIdentity({
+        ...(await resolveProfile(target)),
+        requestedUrl: target,
+        identityVersion: SOCIAL_IDENTITY_VERSION
+      });
       sendJson(res, payload);
       return;
     }
 
     if (url.pathname === "/api/records" && req.method === "GET") {
-      sendJson(res, { ok: true, storage: useDatabase() ? "database" : "file", records: await readRecords() });
+      const records = (await readRecords()).map(withSocialIdentity);
+      sendJson(res, { ok: true, storage: useDatabase() ? "database" : "file", identityVersion: SOCIAL_IDENTITY_VERSION, records });
       return;
     }
 
     if (url.pathname === "/api/health") {
       const records = await readRecords();
-      sendJson(res, { ok: true, storage: useDatabase() ? "database" : "file", count: records.length });
+      sendJson(res, { ok: true, storage: useDatabase() ? "database" : "file", count: records.length, identityVersion: SOCIAL_IDENTITY_VERSION });
       return;
     }
 
     if (url.pathname === "/api/records" && req.method === "POST") {
       const body = await readJsonBody(req);
-      const incomingRecords = Array.isArray(body.records) ? body.records : [];
+      const incomingRecords = Array.isArray(body.records) ? body.records.map(withSocialIdentity) : [];
       const highlightIds = Array.isArray(body.highlightIds) ? body.highlightIds.map(String) : [];
       const removeIds = new Set(Array.isArray(body.removeIds) ? body.removeIds.map(String).filter(Boolean) : []);
       const result = await withRecordsWriteLock(async () => {
@@ -103,6 +117,7 @@ createServer(async (req, res) => {
       }
 
       sendJson(res, { ok: true, count: result.records.length, reportUrl: "/api/report.png", notification: result.notification });
+      scheduleIdentityBackfill();
       return;
     }
 
@@ -164,6 +179,7 @@ createServer(async (req, res) => {
 }).listen(port, () => {
   console.log(`PangPang RSVP system: http://127.0.0.1:${port}/`);
   startDailyReportScheduler();
+  scheduleIdentityBackfill(2500);
 });
 
 async function readRecords() {
@@ -400,20 +416,99 @@ async function queueDailyChanges(highlightIds = []) {
 function mergeRecords(existingRecords, incomingRecords) {
   const byId = new Map();
   for (const record of Array.isArray(existingRecords) ? existingRecords : []) {
-    if (record && record.id) byId.set(String(record.id), record);
+    if (record && record.id) byId.set(String(record.id), withSocialIdentity(record));
   }
   for (const record of Array.isArray(incomingRecords) ? incomingRecords : []) {
     if (!record || !record.id) continue;
     const id = String(record.id);
-    byId.set(id, { ...(byId.get(id) || {}), ...record });
+    const existing = byId.get(id) || {};
+    byId.set(id, mergeServerIdentity(existing, record));
   }
   return Array.from(byId.values());
+}
+
+function mergeServerIdentity(existing = {}, incoming = {}) {
+  return withPreservedSocialIdentity({ ...existing, ...incoming }, existing);
 }
 
 function withRecordsWriteLock(task) {
   const run = recordsWriteQueue.then(task, task);
   recordsWriteQueue = run.then(() => undefined, () => undefined);
   return run;
+}
+
+function scheduleIdentityBackfill(delayMs = 250) {
+  if (identityBackfillPromise) return identityBackfillPromise;
+  identityBackfillPromise = new Promise((resolve) => setTimeout(resolve, delayMs))
+    .then(() => backfillMissingSocialIdentities())
+    .catch((error) => {
+      console.error("Identity backfill failed:", error.message || error);
+      return { updated: 0, failed: 0 };
+    })
+    .finally(() => {
+      identityBackfillPromise = undefined;
+    });
+  return identityBackfillPromise;
+}
+
+async function backfillMissingSocialIdentities() {
+  const snapshot = await readRecords();
+  const retryBefore = Date.now() - 24 * 60 * 60 * 1000;
+  const targets = snapshot.filter((record) => {
+    if (!record?.id || isInactiveRecord(record)) return false;
+    const identified = withSocialIdentity(record);
+    if (identified.creatorId || identified.platform !== "小红书") return false;
+    if (!record.link && !record.postUrl) return false;
+    if (record.identityResolvedAt) return true;
+    const lastAttempt = Date.parse(record.identityLastAttemptAt || "");
+    return !Number.isFinite(lastAttempt) || lastAttempt < retryBefore;
+  }).slice(0, 20);
+  if (!targets.length) return { updated: 0, failed: 0 };
+
+  const updates = new Map();
+  let failed = 0;
+  for (const record of targets) {
+    const targetUrl = record.link || record.postUrl || "";
+    const attemptedAt = new Date().toISOString();
+    const resolved = withSocialIdentity({
+      ...(await resolveProfile(targetUrl)),
+      requestedUrl: targetUrl
+    });
+    if (resolved.ok && resolved.creatorId) {
+      updates.set(String(record.id), {
+        creatorId: resolved.creatorId,
+        creatorKey: resolved.creatorKey,
+        postId: resolved.postId || record.postId || "",
+        postKey: resolved.postKey || record.postKey || "",
+        canonicalProfileUrl: resolved.canonicalProfileUrl || "",
+        canonicalPostUrl: resolved.canonicalPostUrl || "",
+        handle: record.handle || resolved.handle || "",
+        name: record.name || resolved.name || "",
+        followers: record.followers || resolved.followers || "",
+        engagement: record.engagement || resolved.engagement || "",
+        platform: resolved.platform || record.platform || "",
+        identityLastAttemptAt: attemptedAt,
+        identityResolvedAt: attemptedAt,
+        identityError: ""
+      });
+    } else {
+      failed += 1;
+      updates.set(String(record.id), {
+        identityLastAttemptAt: attemptedAt,
+        identityError: resolved.message || "没有取得稳定博主 ID"
+      });
+    }
+  }
+
+  await withRecordsWriteLock(async () => {
+    const current = await readRecords();
+    const next = current.map((record) => {
+      const update = updates.get(String(record?.id || ""));
+      return update ? withSocialIdentity({ ...record, ...update }) : record;
+    });
+    await writeRecords(next);
+  });
+  return { updated: updates.size - failed, failed };
 }
 
 function findChangedDuplicate(records, changedIds) {
@@ -436,26 +531,16 @@ function findChangedDuplicate(records, changedIds) {
 function duplicateKeys(record) {
   if (!record || isInactiveRecord(record)) return [];
   const keys = [];
-  const post = canonicalRecordUrlIdentity(canonicalRecordPostUrl(record.postUrl || ""));
+  const post = postIdentityKey(record);
   if (post) keys.push(`post:${post}`);
 
-  const creator = creatorIdentity(record);
+  const creator = creatorIdentityKey(record);
   const date = normalizeRecordText(record.dateISO || record.dateText || "");
   const time = normalizeRecordText(record.timeText || "");
   if (creator && record.type !== "post" && date && time) {
     keys.push(`booking:${creator}:${date}:${time}`);
   }
   return keys;
-}
-
-function creatorIdentity(record) {
-  const profile = canonicalRecordUrlIdentity(canonicalRecordCreatorUrl(record.link || record.profileUrl || ""));
-  if (profile) return `url:${profile}`;
-  const platform = normalizeRecordText(record.platform || "");
-  const handle = normalizeRecordText(record.handle || "").replace(/^@/, "");
-  if (platform && handle) return `handle:${platform}:${handle}`;
-  const name = normalizeRecordText(record.name || "");
-  return platform && name ? `name:${platform}:${name}` : "";
 }
 
 function canonicalRecordWebUrl(value) {
