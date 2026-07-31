@@ -1052,6 +1052,7 @@
       records: loadRecords(),
       pendingRecord: null,
       pendingPostRecord: null,
+      pendingSourcePostId: "",
       editingId: "",
       inlineEditingId: "",
       inlineEditError: "",
@@ -1132,12 +1133,14 @@
         : draft;
       const earlyDuplicate = findDuplicateRecord(record, state.records, state.editingId);
       if (earlyDuplicate) {
+        if (await prepareDuplicatePostMerge(record, earlyDuplicate)) return;
         blockDuplicateSubmission(record, earlyDuplicate);
         return;
       }
       const enriched = await enrichRecord(record);
       const duplicate = findDuplicateRecord(enriched, state.records, state.editingId);
       if (duplicate) {
+        if (await prepareDuplicatePostMerge(enriched, duplicate)) return;
         blockDuplicateSubmission(enriched, duplicate);
         return;
       }
@@ -1151,6 +1154,7 @@
           return;
         }
         state.editingId = matched.id;
+        state.pendingSourcePostId = "";
         state.pendingPostRecord = null;
         state.pendingRecord = mergePostIntoBooking(matched, enriched);
       } else {
@@ -1228,22 +1232,34 @@
           ? { ...state.pendingRecord, id: editingId, createdAt: new Date().toISOString(), highlightUntil: Date.now() + 72 * 60 * 60 * 1000 }
           : { ...state.pendingRecord, id: String(Date.now()), createdAt: new Date().toISOString(), highlightUntil: Date.now() + 72 * 60 * 60 * 1000 };
         record.status = record.postUrl || record.type === "post" ? "已发布" : normalizeStatus(record.status);
-        const duplicate = findDuplicateRecord(record, state.records, editingId);
+        const sourcePostId = state.pendingSourcePostId;
+        const duplicate = findDuplicateRecord(record, state.records, [editingId, sourcePostId]);
         if (duplicate) {
+          if (await prepareDuplicatePostMerge(record, duplicate)) return;
           blockDuplicateSubmission(record, duplicate);
           return;
         }
         const previousRecords = state.records;
         if (editingId) {
-          state.records = state.records.map((item) => item.id === editingId ? record : item);
+          state.records = state.records
+            .filter((item) => !sourcePostId || String(item.id || "") !== String(sourcePostId))
+            .map((item) => item.id === editingId ? record : item);
         } else {
           state.records.unshift(record);
         }
-        const saveResult = await saveRecords({ highlightIds: [record.id] });
+        const saveResult = await saveRecords({
+          highlightIds: [record.id],
+          removeIds: sourcePostId ? [sourcePostId] : []
+        });
         if (saveResult?.duplicate) {
           state.records = previousRecords;
           localStorage.setItem(KEY, JSON.stringify(state.records));
-          const serverDuplicate = state.records.find((item) => String(item.id) === String(saveResult.duplicateId || ""));
+          const serverDuplicate = state.records.find((item) => String(item.id) === String(saveResult.duplicateId || ""))
+            || await fetchBackendRecord(saveResult.duplicateId);
+          if (await prepareDuplicatePostMerge(record, serverDuplicate)) {
+            render();
+            return;
+          }
           blockDuplicateSubmission(record, serverDuplicate, saveResult.message);
           render();
           return;
@@ -1316,6 +1332,7 @@
       remarks.value = "";
       state.pendingRecord = null;
       state.pendingPostRecord = null;
+      state.pendingSourcePostId = "";
       state.editingId = "";
       setMode("booking");
       reviewPanel.classList.add("hidden");
@@ -1342,8 +1359,9 @@
 
     async function findMatchingBooking(postRecord) {
       const candidates = getPostMatchCandidates();
-      const direct = candidates.find((item) => sameCreator(item, postRecord));
-      if (direct) return direct;
+      const directMatches = candidates.filter((item) => sameCreator(item, postRecord));
+      if (directMatches.length === 1) return directMatches[0];
+      if (directMatches.length > 1) return null;
 
       if (postRecord.platform !== "Instagram" || !normalizeIdentity(postRecord.name)) return null;
       statusLine.textContent = "帖子没有给出作者账号，正在用已有预约主页自动匹配...";
@@ -1356,6 +1374,73 @@
         if (sameCreator(candidate, postRecord)) return item;
       }
       return null;
+    }
+
+    function mergeDuplicatePostData(existingPost, incomingPost) {
+      const incoming = incomingPost || {};
+      const existing = existingPost || {};
+      return {
+        ...incoming,
+        ...existing,
+        postUrl: existing.postUrl || incoming.postUrl || incoming.link || "",
+        postTitle: existing.postTitle || incoming.postTitle || "",
+        postPublishedAt: existing.postPublishedAt || incoming.postPublishedAt || "",
+        postDateText: existing.postDateText || incoming.postDateText || "",
+        postLikes: existing.postLikes || incoming.postLikes || "",
+        postCollects: existing.postCollects || incoming.postCollects || "",
+        postComments: existing.postComments || incoming.postComments || "",
+        postShares: existing.postShares || incoming.postShares || "",
+        postMetricsText: existing.postMetricsText || incoming.postMetricsText || "",
+        link: existing.link || incoming.link || "",
+        handle: existing.handle || incoming.handle || "",
+        name: existing.name || incoming.name || "",
+        followers: existing.followers || incoming.followers || "",
+        engagement: existing.engagement || incoming.engagement || "",
+        platform: existing.platform || incoming.platform || "",
+        owner: incoming.owner || existing.owner || "",
+        submitter: incoming.submitter || existing.submitter || "",
+        remarks: incoming.remarks || existing.remarks || "",
+        type: "post",
+        status: "已发布"
+      };
+    }
+
+    async function prepareDuplicatePostMerge(incomingPost, existingPost) {
+      if (!incomingPost || (!incomingPost.postUrl && incomingPost.type !== "post") || !existingPost) return false;
+
+      if (existingPost.type !== "post" && (existingPost.dateISO || existingPost.timeText)) {
+        const schedule = [existingPost.dateText || existingPost.dateISO, existingPost.timeText].filter(Boolean).join(" ");
+        blockDuplicateSubmission(
+          incomingPost,
+          existingPost,
+          `这篇帖子已经记录在 ${displayCreatorName(existingPost)}${schedule ? ` · ${schedule}` : ""} 的预约中，不需要重复保存。`
+        );
+        return true;
+      }
+
+      const sourcePost = mergeDuplicatePostData(existingPost, incomingPost);
+      const currentBooking = incomingPost.type !== "post"
+        ? state.records.find((item) => String(item.id || "") === String(incomingPost.id || "")
+          && item.type !== "post"
+          && !isInactiveRecord(item))
+        : null;
+      const matched = currentBooking || await findMatchingBooking(sourcePost);
+      state.pendingSourcePostId = String(existingPost.id || "");
+      if (!matched) {
+        state.pendingPostRecord = sourcePost;
+        state.pendingRecord = null;
+        statusLine.textContent = "这篇帖子已经保存过，但还没有关联预约。请选择对应的有效预约，系统会合并记录。";
+        renderPostMatchChooser(sourcePost);
+        return true;
+      }
+
+      state.editingId = matched.id;
+      state.pendingPostRecord = null;
+      state.pendingRecord = mergePostIntoBooking(matched, sourcePost);
+      state.pendingRecord.resolveMessage = "这篇帖子已经保存过，已找到唯一有效预约。确认后会合并为同一条“已发布”记录。";
+      statusLine.textContent = state.pendingRecord.resolveMessage;
+      renderReview(state.pendingRecord);
+      return true;
     }
 
     function getPostMatchCandidates() {
@@ -2269,10 +2354,14 @@
     function findDuplicateRecord(record, records = state.records, ignoreId = "") {
       const keys = duplicateKeys(record);
       if (!keys.length) return null;
-      const selfId = String(ignoreId || record?.id || "");
+      const ignoredIds = new Set(
+        (Array.isArray(ignoreId) ? ignoreId : [ignoreId || record?.id || ""])
+          .map((id) => String(id || ""))
+          .filter(Boolean)
+      );
       return (records || []).find((item) => {
         if (!item) return false;
-        if (selfId && String(item.id || "") === selfId) return false;
+        if (ignoredIds.has(String(item.id || ""))) return false;
         const otherKeys = duplicateKeys(item);
         return otherKeys.some((key) => keys.includes(key));
       }) || null;
@@ -2288,6 +2377,7 @@
     function blockDuplicateSubmission(record, existing, serverMessage = "") {
       state.pendingRecord = null;
       state.pendingPostRecord = null;
+      state.pendingSourcePostId = "";
       const creator = existing ? displayCreatorName(existing) : displayCreatorName(record);
       const schedule = existing
         ? [existing.dateText || existing.dateISO, existing.timeText].filter(Boolean).join(" ")
@@ -2667,7 +2757,8 @@
           body: JSON.stringify({
             records: state.records,
             silent: Boolean(options.silent),
-            highlightIds: options.highlightIds || []
+            highlightIds: options.highlightIds || [],
+            removeIds: options.removeIds || []
           })
         });
         const data = await response.json().catch(() => ({}));
@@ -2686,6 +2777,21 @@
       } catch {
         // Local storage remains the fallback when the backend is offline.
         return { ok: true, storage: "local" };
+      }
+    }
+
+    async function fetchBackendRecord(id) {
+      const targetId = String(id || "");
+      if (!targetId) return null;
+      try {
+        const response = await fetch(apiEndpoint("/api/records"), { headers: { "Accept": "application/json" } });
+        if (!response.ok) return null;
+        const data = await response.json();
+        return Array.isArray(data.records)
+          ? data.records.find((record) => String(record?.id || "") === targetId) || null
+          : null;
+      } catch {
+        return null;
       }
     }
 

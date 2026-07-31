@@ -71,6 +71,7 @@ createServer(async (req, res) => {
       const body = await readJsonBody(req);
       const incomingRecords = Array.isArray(body.records) ? body.records : [];
       const highlightIds = Array.isArray(body.highlightIds) ? body.highlightIds.map(String) : [];
+      const removeIds = new Set(Array.isArray(body.removeIds) ? body.removeIds.map(String).filter(Boolean) : []);
       const result = await withRecordsWriteLock(async () => {
         const existingRecords = await readRecords();
         const existingIds = new Set(existingRecords.map((record) => String(record?.id || "")).filter(Boolean));
@@ -80,7 +81,8 @@ createServer(async (req, res) => {
             .filter((record) => record?.id && !existingIds.has(String(record.id)))
             .map((record) => String(record.id))
         ]);
-        const records = mergeRecords(existingRecords, incomingRecords);
+        const retainedRecords = existingRecords.filter((record) => !removeIds.has(String(record?.id || "")));
+        const records = mergeRecords(retainedRecords, incomingRecords);
         const duplicate = findChangedDuplicate(records, changedIds);
         if (duplicate) return { duplicate };
 
