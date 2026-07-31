@@ -1484,8 +1484,8 @@
       const nameA = normalizeIdentity(a.name);
       const nameB = normalizeIdentity(b.name);
       if (nameA && nameB && nameA === nameB) return true;
-      const linkA = normalizeProfileLink(a.link);
-      const linkB = normalizeProfileLink(b.link);
+      const linkA = normalizeProfileLink(canonicalCreatorProfileUrl(a.link || a.profileUrl || ""));
+      const linkB = normalizeProfileLink(canonicalCreatorProfileUrl(b.link || b.profileUrl || ""));
       return Boolean(linkA && linkB && linkA === linkB);
     }
 
