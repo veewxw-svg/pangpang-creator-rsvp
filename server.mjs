@@ -859,6 +859,34 @@ async function resolveProfile(target) {
     }
     const page = await fetchPage(requestedUrl);
     const finalUrl = page.finalUrl || requestedUrl;
+    if (/(?:rnote|rednote)\.com\/user\/profile\//i.test(finalUrl)) {
+      const rednoteProfile = await fetchRednoteProfileFallback(finalUrl, requestedUrl);
+      if (rednoteProfile.name) {
+        return {
+          ok: true,
+          finalUrl,
+          profileUrl: rednoteProfile.profileUrl || "",
+          postUrl: "",
+          platform: "小红书",
+          handle: rednoteProfile.handle || "",
+          name: rednoteProfile.name || "",
+          followers: rednoteProfile.followers || "",
+          engagement: rednoteProfile.engagement || "",
+          following: "",
+          postCount: "",
+          postLikes: "",
+          postCollects: "",
+          postComments: "",
+          postShares: "",
+          postMetricsText: "",
+          redId: "",
+          description: rednoteProfile.description || "",
+          postTitle: "",
+          publishedAt: "",
+          sourceTitle: rednoteProfile.sourceTitle || ""
+        };
+      }
+    }
     const instagramJson = await fetchInstagramProfileJson(requestedUrl, finalUrl);
     const isRequestedXhsPost = /xiaohongshu\.com|xhslink\.com/i.test(`${requestedUrl} ${finalUrl}`)
       && /\/explore\/|\/discovery\/item|note/i.test(`${requestedUrl} ${finalUrl}`);
@@ -1075,6 +1103,51 @@ async function fetchRednotePostFallback(finalUrl, requestedUrl = "") {
     });
     if (page.status >= 400 || !page.html) return {};
     return parseRednotePost(page.html, page.finalUrl || rednoteUrl.href, noteId);
+  } catch {
+    return {};
+  }
+}
+
+async function fetchRednoteProfileFallback(finalUrl, requestedUrl = "") {
+  const source = [finalUrl, requestedUrl].find((value) => /(?:rnote|rednote)\.com\/user\/profile\/[^/?#]+/i.test(String(value || ""))) || "";
+  const userId = decodeURIComponent(source.match(/\/user\/profile\/([^/?#]+)/i)?.[1] || "");
+  if (!userId) return {};
+
+  try {
+    const sourceUrl = new URL(source);
+    const rednoteUrl = new URL(`https://www.rednote.com/user/profile/${encodeURIComponent(userId)}`);
+    ["xsec_token", "xsec_source"].forEach((key) => {
+      const value = sourceUrl.searchParams.get(key) || "";
+      if (value) rednoteUrl.searchParams.set(key, value);
+    });
+    const page = await fetchPageWithCurl(rednoteUrl.href, {
+      compressed: true,
+      cookies: true,
+      maxTime: 10,
+      noCache: true,
+      referer: "https://www.rednote.com/"
+    });
+    if (page.status >= 400 || !page.html) return {};
+    const meta = collectMeta(page.html);
+    const sourceTitle = meta.ogTitle || meta.title || "";
+    const name = firstUsableXhsCreatorName([
+      String(sourceTitle).replace(/\s*-\s*rednote\s*$/i, "").trim()
+    ]);
+    const description = meta.ogDescription || meta.description || "";
+    const followers = (
+      description.match(/有\s*([\d.,]+\s*(?:万|千)?\+?)\s*位?粉丝/i)?.[1]
+      || description.match(/([\d.,]+\s*[KMW万千]?\+?)\s+followers/i)?.[1]
+      || ""
+    ).replace(/\s+/g, "");
+    return {
+      name,
+      handle: `@${userId}`,
+      profileUrl: `https://www.xiaohongshu.com/user/profile/${userId}`,
+      followers,
+      engagement: "",
+      description,
+      sourceTitle
+    };
   } catch {
     return {};
   }
