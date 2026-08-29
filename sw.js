@@ -1,5 +1,5 @@
-const CACHE_VERSION = "pangpang-kol-rsvp-v3-unified-identity";
-const STATIC_ASSETS = ["./index.html", "./social-identity.mjs", "./manifest.webmanifest"];
+const CACHE_VERSION = "pangpang-kol-rsvp-v5-plan-budget-batch-approval";
+const STATIC_ASSETS = ["./index.html", "./social-identity.mjs", "./rsvp-workflow.mjs", "./manifest.webmanifest"];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(

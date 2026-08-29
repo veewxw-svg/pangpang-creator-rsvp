@@ -12,6 +12,15 @@ import {
   withPreservedSocialIdentity,
   withSocialIdentity
 } from "./social-identity.mjs";
+import {
+  WORKFLOW_VERSION,
+  activePlanDuplicateKey,
+  isPlanRecord,
+  isScheduledRecord,
+  normalizeReviewStatus,
+  validateWorkflowTransition,
+  withWorkflow
+} from "./rsvp-workflow.mjs";
 
 const root = fileURLToPath(new URL(".", import.meta.url));
 const port = Number(process.env.PORT || 8787);
@@ -70,24 +79,29 @@ createServer(async (req, res) => {
     }
 
     if (url.pathname === "/api/records" && req.method === "GET") {
-      const records = (await readRecords()).map(withSocialIdentity);
-      sendJson(res, { ok: true, storage: useDatabase() ? "database" : "file", identityVersion: SOCIAL_IDENTITY_VERSION, records });
+      const records = (await readRecords()).map((record) => withWorkflow(withSocialIdentity(record)));
+      sendJson(res, { ok: true, storage: useDatabase() ? "database" : "file", identityVersion: SOCIAL_IDENTITY_VERSION, workflowVersion: WORKFLOW_VERSION, records });
       return;
     }
 
     if (url.pathname === "/api/health") {
       const records = await readRecords();
-      sendJson(res, { ok: true, storage: useDatabase() ? "database" : "file", count: records.length, identityVersion: SOCIAL_IDENTITY_VERSION });
+      sendJson(res, { ok: true, storage: useDatabase() ? "database" : "file", count: records.length, identityVersion: SOCIAL_IDENTITY_VERSION, workflowVersion: WORKFLOW_VERSION });
       return;
     }
 
     if (url.pathname === "/api/records" && req.method === "POST") {
       const body = await readJsonBody(req);
-      const incomingRecords = Array.isArray(body.records) ? body.records.map(withSocialIdentity) : [];
+      const incomingRecords = Array.isArray(body.records)
+        ? body.records.map((record) => withWorkflow(withSocialIdentity(record)))
+        : [];
       const highlightIds = Array.isArray(body.highlightIds) ? body.highlightIds.map(String) : [];
       const removeIds = new Set(Array.isArray(body.removeIds) ? body.removeIds.map(String).filter(Boolean) : []);
       const result = await withRecordsWriteLock(async () => {
         const existingRecords = await readRecords();
+        const isInitialLegacyImport = Boolean(body.legacyImport) && existingRecords.length === 0;
+        const workflowError = isInitialLegacyImport ? "" : validateWorkflowChanges(existingRecords, incomingRecords);
+        if (workflowError) return { workflowError };
         const existingIds = new Set(existingRecords.map((record) => String(record?.id || "")).filter(Boolean));
         const changedIds = new Set([
           ...highlightIds,
@@ -106,6 +120,11 @@ createServer(async (req, res) => {
         return { records, notification };
       });
 
+      if (result.workflowError) {
+        sendJson(res, { ok: false, error: "INVALID_WORKFLOW_TRANSITION", message: result.workflowError }, 422);
+        return;
+      }
+
       if (result.duplicate) {
         sendJson(res, {
           ok: false,
@@ -116,7 +135,7 @@ createServer(async (req, res) => {
         return;
       }
 
-      sendJson(res, { ok: true, count: result.records.length, reportUrl: "/api/report.png", notification: result.notification });
+      sendJson(res, { ok: true, count: result.records.length, workflowVersion: WORKFLOW_VERSION, reportUrl: "/api/report.png", notification: result.notification });
       scheduleIdentityBackfill();
       return;
     }
@@ -416,7 +435,7 @@ async function queueDailyChanges(highlightIds = []) {
 function mergeRecords(existingRecords, incomingRecords) {
   const byId = new Map();
   for (const record of Array.isArray(existingRecords) ? existingRecords : []) {
-    if (record && record.id) byId.set(String(record.id), withSocialIdentity(record));
+    if (record && record.id) byId.set(String(record.id), withWorkflow(withSocialIdentity(record)));
   }
   for (const record of Array.isArray(incomingRecords) ? incomingRecords : []) {
     if (!record || !record.id) continue;
@@ -427,8 +446,24 @@ function mergeRecords(existingRecords, incomingRecords) {
   return Array.from(byId.values());
 }
 
+function validateWorkflowChanges(existingRecords, incomingRecords) {
+  const existingById = new Map(
+    (Array.isArray(existingRecords) ? existingRecords : [])
+      .filter((record) => record?.id)
+      .map((record) => [String(record.id), withWorkflow(record)])
+  );
+  for (const rawRecord of Array.isArray(incomingRecords) ? incomingRecords : []) {
+    if (!rawRecord?.id) continue;
+    const record = withWorkflow(rawRecord);
+    const existing = existingById.get(String(record.id));
+    const error = validateWorkflowTransition(existing, record);
+    if (error) return error;
+  }
+  return "";
+}
+
 function mergeServerIdentity(existing = {}, incoming = {}) {
-  return withPreservedSocialIdentity({ ...existing, ...incoming }, existing);
+  return withWorkflow(withPreservedSocialIdentity({ ...existing, ...incoming }, existing));
 }
 
 function withRecordsWriteLock(task) {
@@ -504,7 +539,7 @@ async function backfillMissingSocialIdentities() {
     const current = await readRecords();
     const next = current.map((record) => {
       const update = updates.get(String(record?.id || ""));
-      return update ? withSocialIdentity({ ...record, ...update }) : record;
+      return update ? withWorkflow(withSocialIdentity({ ...record, ...update })) : withWorkflow(record);
     });
     await writeRecords(next);
   });
@@ -529,8 +564,14 @@ function findChangedDuplicate(records, changedIds) {
 }
 
 function duplicateKeys(record) {
-  if (!record || isInactiveRecord(record)) return [];
+  if (!record) return [];
   const keys = [];
+  if (isPlanRecord(record)) {
+    const plan = activePlanDuplicateKey(record, creatorIdentityKey(record));
+    if (plan) keys.push(plan);
+    return keys;
+  }
+  if (isInactiveRecord(record)) return [];
   const post = postIdentityKey(record);
   if (post) keys.push(`post:${post}`);
 
@@ -627,7 +668,8 @@ function isInactiveRecord(record) {
 }
 
 function reportableRecords(records) {
-  return (Array.isArray(records) ? records : []).filter((record) => !isArchivedRecord(record));
+  return (Array.isArray(records) ? records : [])
+    .filter((record) => isScheduledRecord(record) && !isArchivedRecord(record));
 }
 
 function reportableHighlightIds(records, highlightIds = []) {
@@ -637,6 +679,10 @@ function reportableHighlightIds(records, highlightIds = []) {
 
 function duplicateMessage(record, existing) {
   const creator = existing?.name || existing?.handle || record?.name || record?.handle || "这位博主";
+  if (isPlanRecord(record) || isPlanRecord(existing)) {
+    const status = normalizeReviewStatus(existing?.reviewStatus) === "approved" ? "已批准，等待安排预约" : "正在等待店长审核";
+    return `重复提醒：${creator} 已经在 Plan 里（${status}），本次没有重复保存。`;
+  }
   const schedule = [existing?.dateText || existing?.dateISO, existing?.timeText].filter(Boolean).join(" ");
   return `重复提醒：${creator}${schedule ? ` · ${schedule}` : ""} 的相同记录已经存在，本次没有重复保存。`;
 }

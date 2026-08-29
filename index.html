@@ -291,6 +291,209 @@
       overflow: hidden;
     }
 
+    .workflow-board-tabs {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+      padding: 8px;
+      background: #f5f5f7;
+      border-bottom: 1px solid var(--line-soft);
+    }
+
+    .workflow-board-tab {
+      min-height: 54px;
+      padding: 9px 14px;
+      border: 0;
+      border-radius: 16px;
+      background: transparent;
+      color: var(--muted);
+      text-align: left;
+      cursor: pointer;
+    }
+
+    .workflow-board-tab strong,
+    .workflow-board-tab small {
+      display: block;
+    }
+
+    .workflow-board-tab strong {
+      color: inherit;
+      font-size: 16px;
+      font-weight: 700;
+    }
+
+    .workflow-board-tab small {
+      margin-top: 3px;
+      font-size: 12px;
+      line-height: 1.25;
+    }
+
+    .workflow-board-tab.active {
+      background: #fff;
+      color: var(--ink);
+      box-shadow: 0 1px 4px rgba(0, 0, 0, .09);
+    }
+
+    .workflow-board-tab.active:first-child {
+      box-shadow: inset 0 0 0 1px rgba(168, 111, 0, .18), 0 1px 4px rgba(0, 0, 0, .09);
+    }
+
+    .plan-filters {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .plan-filters.hidden,
+    .filters.hidden { display: none; }
+
+    .plan-filter {
+      min-height: 38px;
+      padding: 7px 13px;
+      border: 1px solid var(--line-soft);
+      border-radius: 999px;
+      background: #fff;
+      color: var(--muted);
+      font-weight: 650;
+      cursor: pointer;
+    }
+
+    .plan-filter.active {
+      border-color: rgba(0, 113, 227, .35);
+      background: rgba(0, 113, 227, .08);
+      color: var(--blue);
+    }
+
+    .plan-list {
+      display: grid;
+      gap: 1px;
+      background: var(--line-soft);
+    }
+
+    .plan-card {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      gap: 20px;
+      padding: 20px;
+      background: #fff;
+    }
+
+    .plan-card.approved { box-shadow: inset 4px 0 0 var(--green); }
+    .plan-card.pending { box-shadow: inset 4px 0 0 var(--yellow); }
+    .plan-card.rejected { box-shadow: inset 4px 0 0 var(--soft); opacity: .78; }
+
+    .plan-select {
+      display: grid;
+      place-items: start center;
+      padding-top: 2px;
+    }
+
+    .plan-select input {
+      width: 22px;
+      height: 22px;
+      margin: 0;
+      accent-color: var(--blue);
+      cursor: pointer;
+    }
+
+    .plan-select-placeholder {
+      width: 22px;
+      height: 22px;
+    }
+
+    .plan-card-head {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      flex-wrap: wrap;
+    }
+
+    .plan-card-head b {
+      font-size: 18px;
+      font-weight: 700;
+      overflow-wrap: anywhere;
+    }
+
+    .plan-card-actions {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(110px, 1fr));
+      gap: 8px;
+      align-content: center;
+      min-width: 236px;
+    }
+
+    .plan-card-actions button {
+      min-height: 40px;
+      padding: 8px 14px;
+      border: 1px solid var(--line-soft);
+      border-radius: 999px;
+      background: #f5f5f7;
+      color: var(--ink);
+      font-weight: 650;
+      cursor: pointer;
+    }
+
+    .plan-card-actions .approve,
+    .plan-card-actions .schedule {
+      border-color: transparent;
+      background: var(--blue);
+      color: #fff;
+    }
+
+    .plan-card-actions .schedule { grid-column: 1 / -1; }
+
+    .plan-card-actions .reject { color: var(--red); }
+
+    .plan-batch-bar {
+      position: sticky;
+      z-index: 8;
+      bottom: 0;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 16px;
+      align-items: center;
+      padding: 14px 18px;
+      border-top: 1px solid rgba(0, 0, 0, .1);
+      background: rgba(255, 255, 255, .96);
+      box-shadow: 0 -12px 30px rgba(0, 0, 0, .08);
+      backdrop-filter: blur(16px);
+    }
+
+    .plan-batch-bar.hidden { display: none; }
+
+    .plan-batch-summary strong,
+    .plan-batch-summary span {
+      display: block;
+    }
+
+    .plan-batch-summary strong {
+      font-size: 17px;
+      font-weight: 700;
+    }
+
+    .plan-batch-summary span {
+      margin-top: 3px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .plan-batch-actions {
+      display: flex;
+      gap: 8px;
+    }
+
+    .plan-batch-actions button {
+      width: auto;
+      min-width: 120px;
+      min-height: 42px;
+      margin: 0;
+      padding: 8px 16px;
+    }
+
+    .chip.待审核 { background: rgba(168, 111, 0, .12); color: var(--yellow); }
+    .chip.已批准 { background: rgba(36, 138, 61, .12); color: var(--green); }
+    .chip.不邀请 { background: rgba(134, 134, 139, .14); color: var(--soft); }
+
     .metric {
       min-width: 0;
       padding: 18px 16px;
@@ -877,6 +1080,12 @@
     @media (max-width: 620px) {
       .filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .date-filter-control { grid-column: 1 / -1; }
+      .plan-card { grid-template-columns: auto minmax(0, 1fr); gap: 14px; }
+      .plan-card-actions { grid-column: 1 / -1; }
+      .plan-card-actions { min-width: 0; }
+      .plan-batch-bar { grid-template-columns: 1fr; }
+      .plan-batch-actions { display: grid; grid-template-columns: 1fr 1fr; }
+      .plan-batch-actions button { width: 100%; min-width: 0; }
     }
 
     @media (max-width: 430px) {
@@ -900,6 +1109,9 @@
       .review-head, .report-head, .review-actions { flex-direction: column; }
       .review-actions .primary, .review-actions .secondary { width: 100%; }
       .cancel-sheet { padding: 20px; border-radius: 20px; }
+      .workflow-board-tabs { grid-template-columns: 1fr; }
+      .workflow-board-tab { min-height: 48px; }
+      .plan-card-actions { grid-template-columns: 1fr 1fr; }
     }
 
     @media print {
@@ -943,9 +1155,9 @@
 
     <section class="grid">
       <form class="panel form-panel" id="bookingForm">
-        <h2 class="form-title" id="formTitle">新预约</h2>
+        <h2 class="form-title" id="formTitle">加入 Plan</h2>
         <div class="mode-switch" aria-label="信息类型">
-          <button class="active" type="button" data-mode="booking">约博主</button>
+          <button class="active" type="button" data-mode="booking">Plan 候选</button>
           <button type="button" data-mode="post">追踪发帖</button>
         </div>
         <div class="field">
@@ -968,7 +1180,7 @@
             </select>
           </div>
           <div class="field" id="visitTypeField">
-            <label for="visitType">博主状态</label>
+            <label for="visitType">合作方式</label>
             <select id="visitType">
               <option value="" selected></option>
               <option>免费探店</option>
@@ -978,8 +1190,8 @@
         </div>
 
         <div class="field hidden" id="feeField">
-          <label for="feeAmount">付费金额</label>
-          <input id="feeAmount" placeholder="例如 150 / $150 / 150 SGD">
+          <label for="feeAmount">博主价钱（SGD）</label>
+          <input id="feeAmount" inputmode="decimal" placeholder="例如 150">
         </div>
 
         <div class="field">
@@ -998,12 +1210,28 @@
         <div class="summary" id="summary"></div>
         <div class="panel review-panel hidden" id="reviewPanel"></div>
         <div class="panel list-panel">
+          <div class="workflow-board-tabs" aria-label="工作流程板块">
+            <button class="workflow-board-tab active" type="button" data-board="plan">
+              <strong>Plan 候选审核</strong>
+              <small>营销提交 · 店长决定请谁</small>
+            </button>
+            <button class="workflow-board-tab" type="button" data-board="scheduled">
+              <strong>Scheduled 已预约</strong>
+              <small>仅显示已经约好时间的博主</small>
+            </button>
+          </div>
           <div class="list-head">
             <div class="list-title-row">
-              <strong>预约记录</strong>
+              <strong id="listTitle">Plan 候选</strong>
               <span class="date-result-count" id="dateResultCount" hidden></span>
             </div>
-            <div class="filters">
+            <div class="plan-filters" id="planFilters">
+              <button class="plan-filter active" type="button" data-plan-filter="all">全部</button>
+              <button class="plan-filter" type="button" data-plan-filter="pending">待审核</button>
+              <button class="plan-filter" type="button" data-plan-filter="approved">已批准</button>
+              <button class="plan-filter" type="button" data-plan-filter="rejected">不邀请</button>
+            </div>
+            <div class="filters hidden" id="scheduledFilters">
               <div class="date-filter-control">
                 <input id="dateFilter" type="date" lang="zh-CN" aria-label="筛选日期" title="选择日期">
                 <button class="date-filter-clear" id="clearDateFilter" type="button">全部日期</button>
@@ -1024,6 +1252,16 @@
             </div>
           </div>
           <div id="recordList"></div>
+          <div class="plan-batch-bar hidden" id="planBatchBar">
+            <div class="plan-batch-summary">
+              <strong id="planBatchCount">已选择 0 位博主</strong>
+              <span id="planBatchTotal">预计总金额：SGD $0.00</span>
+            </div>
+            <div class="plan-batch-actions">
+              <button class="secondary" type="button" id="clearPlanSelection">清空选择</button>
+              <button class="primary" type="button" id="batchApprovePlan">批量批准</button>
+            </div>
+          </div>
         </div>
         <div class="panel report-panel hidden" id="reportPanel"></div>
       </section>
@@ -1054,11 +1292,23 @@
       withPreservedSocialIdentity,
       withSocialIdentity
     } from "./social-identity.mjs";
+    import {
+      WORKFLOW_VERSION,
+      activePlanDuplicateKey,
+      canSchedulePlan,
+      isPlanRecord,
+      isScheduledRecord,
+      normalizeReviewStatus,
+      planFeeNumber,
+      planPricingError,
+      reviewStatusLabel,
+      withWorkflow
+    } from "./rsvp-workflow.mjs";
 
     const KEY = "pangpang_kol_bookings_v1";
     const weekdays = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
     const state = {
-      records: loadRecords().map(withSocialIdentity),
+      records: loadRecords().map((record) => withWorkflow(withSocialIdentity(record))),
       pendingRecord: null,
       pendingPostRecord: null,
       pendingSourcePostId: "",
@@ -1066,7 +1316,11 @@
       inlineEditingId: "",
       inlineEditError: "",
       cancellingId: "",
-      mode: "booking"
+      schedulingPlanId: "",
+      mode: "booking",
+      board: "plan",
+      planFilter: "all",
+      selectedPlanIds: new Set()
     };
 
     const $ = (id) => document.getElementById(id);
@@ -1090,6 +1344,10 @@
     const reportPanel = $("reportPanel");
     const dateFilter = $("dateFilter");
     const dateResultCount = $("dateResultCount");
+    const listTitle = $("listTitle");
+    const planFilters = $("planFilters");
+    const scheduledFilters = $("scheduledFilters");
+    const planBatchBar = $("planBatchBar");
     const ownerFilter = $("ownerFilter");
     const statusFilter = $("statusFilter");
     const cancelDialog = $("cancelDialog");
@@ -1099,6 +1357,7 @@
       navigator.serviceWorker.register("./sw.js").catch(() => {});
     }
 
+    setMode("booking");
     hydrateFromShareParams();
     const demoLoaded = hydrateDemoRecords();
     render();
@@ -1106,10 +1365,13 @@
 
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
-      statusLine.textContent = state.editingId ? "正在更新这条记录..." : "正在打开链接识别博主信息...";
-      const existing = state.editingId ? state.records.find((item) => item.id === state.editingId) : null;
+      const targetId = state.schedulingPlanId || state.editingId;
+      statusLine.textContent = state.schedulingPlanId
+        ? "正在确认预约时间..."
+        : state.editingId ? "正在更新这条记录..." : "正在打开链接识别博主信息...";
+      const existing = targetId ? state.records.find((item) => String(item.id) === String(targetId)) : null;
       const draft = buildRecord(false);
-      const record = withSocialIdentity(existing
+      const record = withWorkflow(withSocialIdentity(existing
         ? {
             ...existing,
             ...draft,
@@ -1139,21 +1401,42 @@
             visitType: draft.visitType || existing.visitType || "",
             feeAmount: draft.feeAmount || existing.feeAmount || ""
           }
-        : draft);
-      const earlyDuplicate = findDuplicateRecord(record, state.records, state.editingId);
+        : draft));
+      if (isPlanRecord(record) && !record.link) {
+        statusLine.textContent = "请先粘贴博主主页链接，才能加入 Plan。";
+        showToast("缺少博主主页链接");
+        return;
+      }
+      if (isPlanRecord(record) && !record.owner) {
+        statusLine.textContent = "请选择提交人，方便店长知道是谁推荐的。";
+        showToast("请选择提交人");
+        return;
+      }
+      const pricingError = planPricingError(record);
+      if (pricingError) {
+        statusLine.textContent = pricingError;
+        showToast(pricingError);
+        return;
+      }
+      if (state.schedulingPlanId && (!record.dateISO || !record.timeText)) {
+        statusLine.textContent = "请先填写完整的预约日期和时间，才能进入 Scheduled。";
+        showToast("缺少预约日期或时间");
+        return;
+      }
+      const earlyDuplicate = findDuplicateRecord(record, state.records, targetId);
       if (earlyDuplicate) {
         if (await prepareDuplicatePostMerge(record, earlyDuplicate)) return;
         blockDuplicateSubmission(record, earlyDuplicate);
         return;
       }
       const enriched = await enrichRecord(record);
-      const duplicate = findDuplicateRecord(enriched, state.records, state.editingId);
+      const duplicate = findDuplicateRecord(enriched, state.records, targetId);
       if (duplicate) {
         if (await prepareDuplicatePostMerge(enriched, duplicate)) return;
         blockDuplicateSubmission(enriched, duplicate);
         return;
       }
-      if (!state.editingId && enriched.type === "post" && enriched.ok !== false) {
+      if (!targetId && enriched.type === "post" && enriched.ok !== false) {
         const matched = await findMatchingBooking(enriched);
         if (!matched) {
           if (blockUnmatchedXhsPost(enriched)) return;
@@ -1177,9 +1460,28 @@
 
     document.querySelectorAll("[data-mode]").forEach((btn) => {
       btn.addEventListener("click", () => {
+        state.schedulingPlanId = "";
         setMode(btn.dataset.mode);
       });
     });
+
+    document.querySelectorAll("[data-board]").forEach((btn) => {
+      btn.addEventListener("click", () => setBoard(btn.dataset.board));
+    });
+
+    document.querySelectorAll("[data-plan-filter]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        state.planFilter = btn.dataset.planFilter || "all";
+        render();
+      });
+    });
+
+    $("clearPlanSelection").addEventListener("click", () => {
+      state.selectedPlanIds.clear();
+      recordList.querySelectorAll("[data-plan-select]").forEach((input) => { input.checked = false; });
+      renderPlanBatchBar();
+    });
+    $("batchApprovePlan").addEventListener("click", batchApprovePlans);
 
     $("clearInputBtn").addEventListener("click", () => {
       resetForm();
@@ -1237,10 +1539,47 @@
       }
       if (action === "save" && state.pendingRecord) {
         applyReviewEdits();
-        const editingId = state.editingId;
-        let record = withSocialIdentity(editingId
-          ? { ...state.pendingRecord, id: editingId, createdAt: new Date().toISOString(), highlightUntil: Date.now() + 72 * 60 * 60 * 1000 }
-          : { ...state.pendingRecord, id: String(Date.now()), createdAt: new Date().toISOString(), highlightUntil: Date.now() + 72 * 60 * 60 * 1000 });
+        if (isPlanRecord(state.pendingRecord) && !String(state.pendingRecord.name || state.pendingRecord.handle || "").trim()) {
+          statusLine.textContent = "平台没有公开返回博主名字，请在确认区手动填写名字后再加入 Plan。";
+          showToast("请补充博主名字");
+          return;
+        }
+        const editingId = state.schedulingPlanId || state.editingId;
+        const schedulingPlan = state.schedulingPlanId
+          ? state.records.find((item) => String(item.id || "") === String(state.schedulingPlanId))
+          : null;
+        if (state.schedulingPlanId && !canSchedulePlan(schedulingPlan)) {
+          statusLine.textContent = "这位博主还没有获得店长批准，不能安排预约。";
+          showToast("未批准，不能预约");
+          return;
+        }
+        if (state.schedulingPlanId && (!state.pendingRecord.dateISO || !state.pendingRecord.timeText)) {
+          statusLine.textContent = "请先填写完整的预约日期和时间，才能进入 Scheduled。";
+          showToast("缺少预约日期或时间");
+          return;
+        }
+        const nowISO = new Date().toISOString();
+        let record = withWorkflow(withSocialIdentity(editingId
+          ? {
+              ...state.pendingRecord,
+              id: editingId,
+              createdAt: nowISO,
+              highlightUntil: Date.now() + 72 * 60 * 60 * 1000,
+              ...(state.schedulingPlanId ? {
+                workflowStage: "scheduled",
+                reviewStatus: "approved",
+                planCreatedAt: schedulingPlan?.planCreatedAt || schedulingPlan?.createdAt || "",
+                scheduledAt: nowISO,
+                scheduledBy: state.pendingRecord.submitter || state.pendingRecord.owner || ""
+              } : {})
+            }
+          : {
+              ...state.pendingRecord,
+              id: String(Date.now()),
+              createdAt: nowISO,
+              highlightUntil: isPlanRecord(state.pendingRecord) ? 0 : Date.now() + 72 * 60 * 60 * 1000,
+              ...(isPlanRecord(state.pendingRecord) ? { planCreatedAt: nowISO } : {})
+            }));
         record.status = record.postUrl || record.type === "post" ? "已发布" : normalizeStatus(record.status);
         const sourcePostId = state.pendingSourcePostId;
         const duplicate = findDuplicateRecord(record, state.records, [editingId, sourcePostId]);
@@ -1257,8 +1596,10 @@
         } else {
           state.records.unshift(record);
         }
+        const isPlanSave = isPlanRecord(record);
         const saveResult = await saveRecords({
-          highlightIds: [record.id],
+          silent: isPlanSave,
+          highlightIds: isPlanSave ? [] : [record.id],
           removeIds: sourcePostId ? [sourcePostId] : []
         });
         if (saveResult?.duplicate) {
@@ -1274,10 +1615,33 @@
           render();
           return;
         }
+        if (saveResult?.ok === false) {
+          state.records = previousRecords;
+          localStorage.setItem(KEY, JSON.stringify(state.records));
+          statusLine.textContent = saveResult.message || "后台没有接受这次流程变更，本次没有保存。";
+          showToast("流程不符合要求，未保存");
+          render();
+          return;
+        }
         state.pendingRecord = null;
+        const completedScheduling = Boolean(state.schedulingPlanId);
         resetForm();
-        const savedLabel = record.status === "已发布" ? "已更新为已发布" : (editingId ? "已更新" : "已保存");
-        statusLine.textContent = `${record.dateISO ? savedLabel : `注意：日期未识别，${savedLabel}`}：${record.dateText || "未填日期"} ${record.timeText || "未填时间"} ${displayCreatorName(record)}`;
+        if (isPlanSave) {
+          state.board = "plan";
+          state.planFilter = "pending";
+          statusLine.textContent = `已加入 Plan，等待店长审核：${displayCreatorName(record)}`;
+        } else if (completedScheduling) {
+          state.board = "scheduled";
+          dateFilter.value = record.dateISO || "";
+          statusLine.textContent = `预约已确认并进入 Scheduled：${record.dateText} ${record.timeText} ${displayCreatorName(record)}`;
+        } else {
+          if (record.status === "已发布") {
+            state.board = "scheduled";
+            dateFilter.value = record.dateISO || "";
+          }
+          const savedLabel = record.status === "已发布" ? "已更新为已发布" : (editingId ? "已更新" : "已保存");
+          statusLine.textContent = `${record.dateISO ? savedLabel : `注意：日期未识别，${savedLabel}`}：${record.dateText || "未填日期"} ${record.timeText || "未填时间"} ${displayCreatorName(record)}`;
+        }
         reviewPanel.classList.add("hidden");
         render();
         scrollToRecord(record.id);
@@ -1286,13 +1650,17 @@
 
     function buildRecord(withId = true) {
       const profile = parseProfile(profileText.value);
-      const booking = state.mode === "post" ? {} : parseBooking(bookingText.value);
+      const isPlanCandidate = state.mode === "booking" && !state.schedulingPlanId && !state.editingId;
+      const booking = state.mode === "post" || isPlanCandidate ? {} : parseBooking(bookingText.value);
       const remarkText = mergeBookingRemarks(remarks.value.trim(), booking.partyText);
-      return withSocialIdentity({
+      return withWorkflow(withSocialIdentity({
         id: withId ? String(Date.now()) : "draft",
         createdAt: new Date().toISOString(),
         type: state.mode,
         status: state.mode === "post" ? "已发布" : "新增",
+        workflowVersion: WORKFLOW_VERSION,
+        workflowStage: isPlanCandidate ? "plan" : "scheduled",
+        reviewStatus: isPlanCandidate ? "pending" : undefined,
         owner: owner.value,
         submitter: owner.value,
         reportLang: owner.value.includes("英文") ? "英文" : owner.value.includes("中文") ? "中文" : "",
@@ -1317,19 +1685,26 @@
         visitType: state.mode === "post" ? "" : visitType.value,
         feeAmount: state.mode === "post" || visitType.value !== "付费探店" ? "" : feeAmount.value.trim(),
         remarks: remarkText
-      });
+      }));
     }
 
     function setMode(mode) {
       state.mode = mode;
       document.querySelectorAll("[data-mode]").forEach((item) => item.classList.toggle("active", item.dataset.mode === mode));
       const isPost = state.mode === "post";
-      formTitle.textContent = state.editingId ? (isPost ? "修改发帖记录" : "修改预约") : (isPost ? "新发帖记录" : "新预约");
-      submitBtn.textContent = state.editingId ? "保存修改" : (isPost ? "识别发帖并确认" : "识别并确认");
+      const isScheduling = Boolean(state.schedulingPlanId);
+      formTitle.textContent = isScheduling
+        ? "安排预约"
+        : state.editingId ? (isPost ? "修改发帖记录" : "修改预约") : (isPost ? "新发帖记录" : "加入 Plan");
+      submitBtn.textContent = isScheduling
+        ? "确认预约并进入 Scheduled"
+        : state.editingId ? "保存修改" : (isPost ? "识别发帖并确认" : "识别候选并确认");
       profileLabel.textContent = isPost ? "帖子链接" : "博主主页链接";
       profileText.placeholder = isPost ? "https://www.instagram.com/p/..." : "https://www.instagram.com/username/";
-      bookingField.style.display = isPost ? "none" : "";
+      bookingField.style.display = isPost || !isScheduling ? "none" : "";
       visitTypeField.style.display = isPost ? "none" : "";
+      visitType.disabled = isScheduling;
+      feeAmount.disabled = isScheduling;
       syncVisitTypeFields();
     }
 
@@ -1338,12 +1713,15 @@
       bookingText.value = "";
       owner.value = "";
       visitType.value = "";
+      visitType.disabled = false;
       feeAmount.value = "";
+      feeAmount.disabled = false;
       remarks.value = "";
       state.pendingRecord = null;
       state.pendingPostRecord = null;
       state.pendingSourcePostId = "";
       state.editingId = "";
+      state.schedulingPlanId = "";
       setMode("booking");
       reviewPanel.classList.add("hidden");
     }
@@ -1484,6 +1862,7 @@
     function getPostMatchCandidates() {
       const selectedDate = dateFilter?.value || "";
       return state.records.filter((item) => {
+        if (!isScheduledRecord(item)) return false;
         if (item.id === state.editingId || isInactiveRecord(item)) return false;
         if (item.type === "post") return false;
         if (normalizeStatus(item.status) !== "新增" || item.postUrl) return false;
@@ -1698,7 +2077,7 @@
         const isDatabaseStorage = data.storage === "database";
         if (!Array.isArray(data.records) || !data.records.length) {
           if (state.records.length && !isDatabaseStorage) {
-            await saveRecords();
+            await saveRecords({ silent: true, legacyImport: true });
             statusLine.textContent = "已把本机记录同步到后台";
           } else if (isDatabaseStorage) {
             state.records = [];
@@ -1710,10 +2089,10 @@
         }
         const serverRecords = data.records
           .filter((record) => !isInvalidDraftRecord(record))
-          .map(withSocialIdentity);
+          .map((record) => withWorkflow(withSocialIdentity(record)));
         state.records = (isDatabaseStorage ? serverRecords : mergeRecordLists(state.records, serverRecords))
           .filter((record) => !isInvalidDraftRecord(record))
-          .map(withSocialIdentity);
+          .map((record) => withWorkflow(withSocialIdentity(record)));
         localStorage.setItem(KEY, JSON.stringify(state.records));
         if (!isDatabaseStorage && state.records.length !== serverRecords.length) {
           await saveRecords({ silent: true });
@@ -1941,11 +2320,16 @@
     }
 
     function render() {
-      const records = getFilteredRecords();
       renderSummary();
+      syncBoardControls();
+      if (state.board === "plan") {
+        renderPlanBoard();
+        return;
+      }
+      const records = getFilteredRecords();
       renderDateResultCount(records);
       if (!records.length) {
-        recordList.innerHTML = '<div class="empty">还没有预约记录</div>';
+        recordList.innerHTML = '<div class="empty">这个筛选条件下还没有 Scheduled 预约</div>';
         return;
       }
       const grouped = groupByDate(records);
@@ -1956,6 +2340,235 @@
           ${items.map(renderRecord).join("")}
         </section>`;
       }).join("");
+      bindScheduledRecordActions();
+    }
+
+    function syncBoardControls() {
+      document.querySelectorAll("[data-board]").forEach((item) => {
+        item.classList.toggle("active", item.dataset.board === state.board);
+      });
+      planFilters.classList.toggle("hidden", state.board !== "plan");
+      scheduledFilters.classList.toggle("hidden", state.board !== "scheduled");
+      planBatchBar.classList.toggle("hidden", state.board !== "plan");
+      listTitle.textContent = state.board === "plan" ? "Plan 候选" : "Scheduled 预约记录";
+      document.querySelectorAll("[data-plan-filter]").forEach((item) => {
+        item.classList.toggle("active", item.dataset.planFilter === state.planFilter);
+      });
+      if (state.board === "plan") {
+        dateResultCount.hidden = true;
+        dateResultCount.textContent = "";
+      }
+    }
+
+    function setBoard(board) {
+      state.board = board === "scheduled" ? "scheduled" : "plan";
+      state.inlineEditingId = "";
+      state.inlineEditError = "";
+      render();
+    }
+
+    function renderPlanBoard() {
+      const pendingIds = new Set(state.records
+        .filter((item) => isPlanRecord(item) && normalizeReviewStatus(item.reviewStatus) === "pending")
+        .map((item) => String(item.id || "")));
+      [...state.selectedPlanIds].forEach((id) => {
+        if (!pendingIds.has(String(id))) state.selectedPlanIds.delete(String(id));
+      });
+      renderPlanBatchBar();
+      const records = state.records
+        .filter(isPlanRecord)
+        .filter((item) => state.planFilter === "all" || normalizeReviewStatus(item.reviewStatus) === state.planFilter)
+        .slice()
+        .sort((a, b) => {
+          const rank = { pending: 0, approved: 1, rejected: 2 };
+          const statusDiff = rank[normalizeReviewStatus(a.reviewStatus)] - rank[normalizeReviewStatus(b.reviewStatus)];
+          if (statusDiff) return statusDiff;
+          return String(b.planCreatedAt || b.createdAt || "").localeCompare(String(a.planCreatedAt || a.createdAt || ""));
+        });
+      if (!records.length) {
+        recordList.innerHTML = '<div class="empty">这个筛选条件下还没有 Plan 候选</div>';
+        return;
+      }
+      recordList.innerHTML = `<div class="plan-list">${records.map(renderPlanRecord).join("")}</div>`;
+      recordList.querySelectorAll("[data-plan-review]").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          btn.disabled = true;
+          await applyPlanReview(btn.dataset.planId, btn.dataset.planReview);
+        });
+      });
+      recordList.querySelectorAll("[data-plan-schedule]").forEach((btn) => {
+        btn.addEventListener("click", () => startSchedulePlan(btn.dataset.planSchedule));
+      });
+      recordList.querySelectorAll("[data-plan-select]").forEach((input) => {
+        input.addEventListener("change", () => {
+          const id = String(input.dataset.planSelect || "");
+          if (input.checked) state.selectedPlanIds.add(id);
+          else state.selectedPlanIds.delete(id);
+          renderPlanBatchBar();
+        });
+      });
+    }
+
+    function renderPlanRecord(record) {
+      const reviewStatus = normalizeReviewStatus(record.reviewStatus);
+      const label = reviewStatusLabel(reviewStatus);
+      const historicalNoShow = findCreatorNoShow(record, state.records, record.id);
+      const details = [
+        record.platform,
+        record.followers ? `粉丝 ${record.followers}` : "",
+        record.engagement ? `${record.platform === "Instagram" ? "数据" : "赞藏"} ${record.engagement}` : "",
+        paymentText(record),
+        record.remarks
+      ].filter(Boolean).join(" · ");
+      const actions = reviewStatus === "pending"
+        ? `<button class="approve" type="button" data-plan-review="approved" data-plan-id="${escapeHtml(record.id || "")}">批准邀请</button>
+           <button class="reject" type="button" data-plan-review="rejected" data-plan-id="${escapeHtml(record.id || "")}">不邀请</button>`
+        : reviewStatus === "approved"
+          ? `<button class="schedule" type="button" data-plan-schedule="${escapeHtml(record.id || "")}">填写预约</button>
+             <button class="reject" type="button" data-plan-review="rejected" data-plan-id="${escapeHtml(record.id || "")}">改为不邀请</button>`
+          : `<button class="approve" type="button" data-plan-review="approved" data-plan-id="${escapeHtml(record.id || "")}">重新批准</button>`;
+      return `<article class="plan-card ${escapeHtml(reviewStatus)}" data-record-id="${escapeHtml(record.id || "")}">
+        <label class="plan-select" title="选择这位博主">
+          ${reviewStatus === "pending"
+            ? `<input type="checkbox" data-plan-select="${escapeHtml(record.id || "")}" aria-label="选择 ${escapeHtml(displayCreatorName(record))}"${state.selectedPlanIds.has(String(record.id || "")) ? " checked" : ""}>`
+            : '<span class="plan-select-placeholder"></span>'}
+        </label>
+        <div class="creator">
+          <div class="plan-card-head">
+            <b>${escapeHtml(displayCreatorName(record))}</b>
+            <span class="chip ${escapeHtml(label)}">${escapeHtml(label)}</span>
+            ${historicalNoShow ? '<span class="chip 爽约">历史有爽约</span>' : ""}
+          </div>
+          <div class="meta">${escapeHtml(details || "资料待补")}</div>
+          <div class="meta">提交人：${escapeHtml(record.submitter || record.owner || "未填写")}${record.reviewedAt ? ` · 店长审核：${escapeHtml(formatAuditTime(record.reviewedAt))}` : ""}</div>
+          ${record.link ? `<div class="link-row">${renderLinkButton("查看主页", record.link)}</div>` : ""}
+        </div>
+        <div class="plan-card-actions">${actions}</div>
+      </article>`;
+    }
+
+    function selectedPendingPlans() {
+      return state.records.filter((item) => isPlanRecord(item)
+        && normalizeReviewStatus(item.reviewStatus) === "pending"
+        && state.selectedPlanIds.has(String(item.id || "")));
+    }
+
+    function renderPlanBatchBar() {
+      const selected = selectedPendingPlans();
+      const total = selected.reduce((sum, item) => sum + planFeeNumber(item), 0);
+      $("planBatchCount").textContent = `已选择 ${selected.length} 位博主`;
+      $("planBatchTotal").textContent = `预计总金额：${formatSgd(total)} · 免费 ${selected.filter((item) => item.visitType === "免费探店").length} 位 · 付费 ${selected.filter((item) => item.visitType === "付费探店").length} 位`;
+      $("batchApprovePlan").disabled = selected.length === 0;
+    }
+
+    function formatSgd(value) {
+      const amount = new Intl.NumberFormat("en-SG", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number(value || 0));
+      return `SGD $${amount}`;
+    }
+
+    async function batchApprovePlans() {
+      const selected = selectedPendingPlans();
+      if (!selected.length) {
+        showToast("请先勾选要批准的博主");
+        return;
+      }
+      const invalid = selected.find((item) => planPricingError(item));
+      if (invalid) {
+        statusLine.textContent = `${displayCreatorName(invalid)}：${planPricingError(invalid)}`;
+        showToast("有候选缺少合作方式或价钱");
+        return;
+      }
+      const button = $("batchApprovePlan");
+      button.disabled = true;
+      button.textContent = "正在批准...";
+      const previousRecords = state.records;
+      const reviewedAt = new Date().toISOString();
+      const selectedIds = new Set(selected.map((item) => String(item.id || "")));
+      state.records = state.records.map((item) => selectedIds.has(String(item.id || ""))
+        ? withWorkflow({ ...item, reviewStatus: "approved", reviewedAt, reviewedBy: "店长批量审核" })
+        : item);
+      const result = await saveRecords({ silent: true });
+      button.textContent = "批量批准";
+      if (result?.ok === false) {
+        state.records = previousRecords;
+        localStorage.setItem(KEY, JSON.stringify(state.records));
+        statusLine.textContent = result.message || "批量批准没有保存。";
+        showToast("批量批准未保存");
+      } else {
+        const total = selected.reduce((sum, item) => sum + planFeeNumber(item), 0);
+        state.selectedPlanIds.clear();
+        statusLine.textContent = `已批量批准 ${selected.length} 位博主，预计总金额 ${formatSgd(total)}。`;
+        showToast(`已批准 ${selected.length} 位博主`);
+      }
+      render();
+    }
+
+    async function applyPlanReview(id, nextStatus) {
+      const recordId = String(id || "");
+      const existing = state.records.find((item) => String(item.id || "") === recordId && isPlanRecord(item));
+      if (!existing) return;
+      if (nextStatus === "approved" && planPricingError(existing)) {
+        statusLine.textContent = `${displayCreatorName(existing)}：${planPricingError(existing)}`;
+        showToast("请先补齐合作方式和价钱");
+        return;
+      }
+      const previousRecords = state.records;
+      const reviewedAt = new Date().toISOString();
+      const updated = withWorkflow({
+        ...existing,
+        reviewStatus: normalizeReviewStatus(nextStatus),
+        reviewedAt,
+        reviewedBy: "店长审核"
+      });
+      state.records = state.records.map((item) => String(item.id || "") === recordId ? updated : item);
+      const result = await saveRecords({ silent: true });
+      if (result?.duplicate) {
+        state.records = previousRecords;
+        localStorage.setItem(KEY, JSON.stringify(state.records));
+        statusLine.textContent = result.message || "这位博主已经在 Plan 里，本次没有保存。";
+        showToast("Plan 中已有相同博主");
+      } else if (result?.ok === false) {
+        state.records = previousRecords;
+        localStorage.setItem(KEY, JSON.stringify(state.records));
+        statusLine.textContent = result.message || "审核状态没有保存。";
+        showToast("审核状态未保存");
+      } else {
+        statusLine.textContent = nextStatus === "approved"
+          ? `店长已批准邀请：${displayCreatorName(updated)}`
+          : `店长已标记不邀请：${displayCreatorName(updated)}`;
+        showToast(nextStatus === "approved" ? "已批准，可以填写预约" : "已标记不邀请");
+      }
+      render();
+    }
+
+    function startSchedulePlan(id) {
+      const record = state.records.find((item) => String(item.id || "") === String(id || ""));
+      if (!canSchedulePlan(record)) {
+        statusLine.textContent = "只有店长已经批准的 Plan 候选才能填写预约。";
+        showToast("未批准，不能预约");
+        return;
+      }
+      resetForm();
+      state.schedulingPlanId = String(record.id || "");
+      state.mode = "booking";
+      profileText.value = record.link || record.canonicalProfileUrl || "";
+      owner.value = record.submitter || record.owner || "";
+      visitType.value = record.visitType || "";
+      feeAmount.value = record.feeAmount || "";
+      remarks.value = record.remarks || "";
+      setMode("booking");
+      statusLine.textContent = `正在为已批准的 ${displayCreatorName(record)} 安排预约，请填写日期、时间、人数和电话。`;
+      form.scrollIntoView({ behavior: "smooth", block: "start" });
+      bookingText.focus({ preventScroll: true });
+    }
+
+    function formatAuditTime(value) {
+      const date = new Date(value || "");
+      if (Number.isNaN(date.getTime())) return "已完成";
+      return date.toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
+    }
+
+    function bindScheduledRecordActions() {
       recordList.querySelectorAll("[data-edit]").forEach((btn) => {
         btn.addEventListener("click", () => startEditRecord(btn.dataset.edit));
       });
@@ -2036,18 +2649,20 @@
 
     function renderSummary() {
       const all = state.records.filter((item) => !isArchivedRecord(item));
-      const booking = all.filter((item) => normalizeStatus(item.status) === "新增").length;
-      const cancelled = all.filter((item) => normalizeStatus(item.status) === "取消").length;
-      const noShows = all.filter((item) => normalizeStatus(item.status) === "爽约").length;
-      const published = all.filter((item) => normalizeStatus(item.status) === "已发布").length;
-      const duplicates = all.filter((item) => isDuplicateRecord(item)).length;
+      const plans = all.filter(isPlanRecord);
+      const scheduled = all.filter(isScheduledRecord);
+      const pending = plans.filter((item) => normalizeReviewStatus(item.reviewStatus) === "pending").length;
+      const approved = plans.filter((item) => normalizeReviewStatus(item.reviewStatus) === "approved").length;
+      const cancelled = scheduled.filter((item) => normalizeStatus(item.status) === "取消").length;
+      const noShows = scheduled.filter((item) => normalizeStatus(item.status) === "爽约").length;
+      const published = scheduled.filter((item) => normalizeStatus(item.status) === "已发布").length;
       summary.innerHTML = [
-        ["总记录", all.length],
-        ["新增", booking],
+        ["Plan 待审核", pending],
+        ["Plan 已批准", approved],
+        ["Scheduled", scheduled.length],
         ["取消", cancelled],
-        ["爽约", noShows],
         ["已发布", published],
-        ["重复", duplicates]
+        ["爽约", noShows]
       ].map(([label, value]) => `<div class="metric"><strong>${value}</strong><span>${label}</span></div>`).join("");
     }
 
@@ -2177,7 +2792,7 @@
         dateResultCount.textContent = "";
         return;
       }
-      const dayTotal = state.records.filter((item) => item.dateISO === dateValue && !isArchivedRecord(item)).length;
+      const dayTotal = state.records.filter((item) => isScheduledRecord(item) && item.dateISO === dateValue && !isArchivedRecord(item)).length;
       const hasExtraFilter = ownerFilter.value !== "all" || statusFilter.value !== "all";
       dateResultCount.textContent = hasExtraFilter
         ? `当天共 ${dayTotal} 位 · 当前 ${records.length} 位`
@@ -2300,8 +2915,14 @@
     }
 
     function duplicateKeys(record) {
-      if (!record || isInactiveRecord(record)) return [];
+      if (!record) return [];
       const keys = [];
+      if (isPlanRecord(record)) {
+        const planKey = activePlanDuplicateKey(record, creatorIdentityKey(record));
+        if (planKey) keys.push(planKey);
+        return keys;
+      }
+      if (isInactiveRecord(record)) return [];
       const post = postIdentityKey(record);
       if (post) keys.push(`post:${post}`);
 
@@ -2456,6 +3077,7 @@
       const ownerValue = ownerFilter.value;
       const statusValue = statusFilter.value;
       return state.records
+        .filter(isScheduledRecord)
         .filter((item) => !dateValue || item.dateISO === dateValue)
         .filter((item) => ownerValue === "all" || item.owner === ownerValue)
         .filter((item) => {
@@ -2513,10 +3135,22 @@
 
     function renderReview(record) {
       reviewPanel.classList.remove("hidden");
+      const planCandidate = isPlanRecord(record);
+      const schedulingPlan = Boolean(state.schedulingPlanId);
       const duplicate = isDuplicateRecord(record, recordsWithCandidate(record));
-      const historicalNoShow = findCreatorNoShow(record, state.records, state.editingId || record.id);
+      const historicalNoShow = findCreatorNoShow(record, state.records, state.schedulingPlanId || state.editingId || record.id);
       const postMissingText = record.platform === "Instagram" ? "Instagram未公开" : "待补";
-      const facts = record.postUrl ? [
+      const facts = planCandidate ? [
+        ["博主名字", editableFact("name", record.name || record.handle || ""), true],
+        ["主页链接", record.link ? renderLinkButton("查看主页", record.link) : "待补", true],
+        ...(duplicate ? [["重复提醒", '<span class="chip 重复">Plan 中已有相同博主</span>', true]] : []),
+        ...(historicalNoShow ? [["历史提醒", '<span class="chip 爽约">这位博主以前有爽约记录</span>', true]] : []),
+        ["粉丝", editableFact("followers", record.followers || ""), true],
+        [record.platform === "Instagram" ? "帖子 / 关注" : "赞藏 / 总赞", editableFact("engagement", record.engagement || ""), true],
+        ["合作方式 / 价钱", paymentText(record) || "待补"],
+        ["提交人", record.submitter || record.owner || "未填写"],
+        ["备注", record.remarks || "无"]
+      ] : record.postUrl ? [
         ["博主名字", editableFact("name", record.name || record.handle || ""), true],
         ["主页链接", record.link ? renderLinkButton("查看主页", record.link) : "待补", true],
         ...(duplicate ? [["重复提醒", '<span class="chip 重复">重复博主</span>', true]] : []),
@@ -2547,17 +3181,21 @@
       ];
       reviewPanel.innerHTML = `<div class="review-head">
         <div>
-          <h2>确认信息</h2>
-          <p>保存后会进入后台记录，今天的日报会汇总当天变动。</p>
+          <h2>${planCandidate ? "确认 Plan 候选" : schedulingPlan ? "确认预约" : "确认信息"}</h2>
+          <p>${planCandidate
+            ? "保存后进入 Plan 等待店长审核；这里不填写预约时间，也不会进入日报。"
+            : schedulingPlan
+              ? "保存后这条候选会离开 Plan，并自动进入 Scheduled。"
+              : "保存后会进入后台记录，今天的日报会汇总当天变动。"}</p>
         </div>
-        <span class="chip ${escapeHtml(normalizeStatus(record.status))}">${escapeHtml(normalizeStatus(record.status))}</span>
+        <span class="chip ${escapeHtml(planCandidate ? "待审核" : normalizeStatus(record.status))}">${escapeHtml(planCandidate ? "待审核" : normalizeStatus(record.status))}</span>
       </div>
       <div class="review-grid">
         ${facts.map(([label, value, isHtml]) => `<div class="fact"><span>${escapeHtml(label)}</span><b>${isHtml ? value : escapeHtml(value)}</b></div>`).join("")}
       </div>
       <div class="review-actions">
         <button class="secondary" type="button" data-review-action="back">返回修改</button>
-        <button class="primary" type="button" data-review-action="save">确定保存</button>
+        <button class="primary" type="button" data-review-action="save">${planCandidate ? "加入 Plan，等待审核" : schedulingPlan ? "确认并进入 Scheduled" : "确定保存"}</button>
       </div>`;
       reviewPanel.scrollIntoView({ behavior: "smooth", block: "start" });
     }
@@ -2582,7 +3220,7 @@
     }
 
     function renderReport() {
-      const records = getFilteredRecords();
+      const records = getFilteredRecords().filter(isScheduledRecord);
       reportPanel.classList.remove("hidden");
       reportPanel.innerHTML = `<div class="report-head">
         <div>
@@ -2630,9 +3268,9 @@
     }
 
     function exportCsv() {
-      const header = ["信息类型", "状态", "取消原因", "是否作废隐藏", "是否重复", "是否高亮", "日期", "星期", "时间", "发帖日期", "平台", "博主账号", "名字", "粉丝数", "数据/赞藏", "点赞", "收藏", "评论", "转发", "帖子数据", "RSVP人数", "电话", "博主状态", "付费金额", "备注", "提交人", "主页链接", "帖子链接", "更新时间"];
+      const header = ["流程板块", "店长审核", "信息类型", "状态", "取消原因", "是否作废隐藏", "是否重复", "是否高亮", "日期", "星期", "时间", "发帖日期", "平台", "博主账号", "名字", "粉丝数", "数据/赞藏", "点赞", "收藏", "评论", "转发", "帖子数据", "RSVP人数", "电话", "博主状态", "付费金额", "备注", "提交人", "主页链接", "帖子链接", "更新时间"];
       const rows = state.records.slice().sort(sortRecords).map((item) => [
-        item.type === "post" ? "发帖追踪" : "探店预约", normalizeStatus(item.status), item.cancelReason || "", isArchivedRecord(item) ? "是" : "", isDuplicateRecord(item) ? "是" : "", isHighlighted(item) ? "是" : "", item.dateISO, item.weekday, item.timeText, item.postDateText || formatChineseDate(item.postPublishedAt), item.platform, item.handle, item.name, item.followers, item.engagement,
+        isPlanRecord(item) ? "Plan" : "Scheduled", isPlanRecord(item) ? reviewStatusLabel(item.reviewStatus) : "", item.type === "post" ? "发帖追踪" : "探店预约", normalizeStatus(item.status), item.cancelReason || "", isArchivedRecord(item) ? "是" : "", isDuplicateRecord(item) ? "是" : "", isHighlighted(item) ? "是" : "", item.dateISO, item.weekday, item.timeText, item.postDateText || formatChineseDate(item.postPublishedAt), item.platform, item.handle, item.name, item.followers, item.engagement,
         item.postLikes, item.postCollects, item.postComments, item.postShares, item.postMetricsText, item.pax, item.phone, item.visitType, item.feeAmount, item.remarks, item.submitter || item.owner, item.link, item.postUrl, item.createdAt
       ]);
       const csv = [header, ...rows].map((row) => row.map(csvCell).join(",")).join("\n");
@@ -2655,7 +3293,9 @@
       if (likelyPost) {
         setMode("post");
       }
-      statusLine.textContent = "已接收分享内容，请补充时间、人数、电话后确认";
+      statusLine.textContent = likelyPost
+        ? "已接收帖子分享，请确认发帖信息"
+        : "已接收博主主页，请确认候选信息后加入 Plan";
     }
 
     function hydrateDemoRecords() {
@@ -2768,9 +3408,9 @@
         preferred = a;
         fallback = b;
       }
-      return withPreservedSocialIdentity({
+      return withWorkflow(withPreservedSocialIdentity({
         ...preferred,
-      }, fallback);
+      }, fallback));
     }
 
     function recordCompletenessScore(record) {
@@ -2791,6 +3431,7 @@
     }
 
     function isInvalidDraftRecord(record) {
+      if (isPlanRecord(record)) return false;
       const title = displayCreatorName(record);
       const hasNoBookingInfo = !record?.dateISO
         && !record?.timeText
@@ -2815,6 +3456,7 @@
           body: JSON.stringify({
             records: state.records,
             silent: Boolean(options.silent),
+            legacyImport: Boolean(options.legacyImport),
             highlightIds: options.highlightIds || [],
             removeIds: options.removeIds || []
           })
@@ -2829,7 +3471,12 @@
               message: data.message || "重复信息，本次没有保存。"
             };
           }
-          throw new Error(data.message || `HTTP ${response.status}`);
+          return {
+            ok: false,
+            status: response.status,
+            error: data.error || "REQUEST_REJECTED",
+            message: data.message || `HTTP ${response.status}`
+          };
         }
         return { ok: true, data };
       } catch {
