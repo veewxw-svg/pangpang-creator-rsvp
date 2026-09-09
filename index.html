@@ -1598,6 +1598,7 @@
         }
         const isPlanSave = isPlanRecord(record);
         const saveResult = await saveRecords({
+          records: [record],
           silent: isPlanSave,
           highlightIds: isPlanSave ? [] : [record.id],
           removeIds: sourcePostId ? [sourcePostId] : []
@@ -1619,7 +1620,7 @@
           state.records = previousRecords;
           localStorage.setItem(KEY, JSON.stringify(state.records));
           statusLine.textContent = saveResult.message || "后台没有接受这次流程变更，本次没有保存。";
-          showToast("流程不符合要求，未保存");
+          showToast(saveResult.message || "流程不符合要求，未保存");
           render();
           return;
         }
@@ -2108,11 +2109,12 @@
     async function refreshPostMetricsOnOpen() {
       const targets = state.records.filter((item) => item.postUrl && normalizeStatus(item.status) === "已发布");
       if (!targets.length) return;
-      let changed = false;
+      const changedRecords = [];
       statusLine.textContent = `已连接后台记录，正在刷新 ${targets.length} 条帖子数据...`;
       for (const record of targets) {
         const resolved = await resolveProfileUrl(record.postUrl);
         if (!resolved.ok) continue;
+        let recordChanged = false;
         const updates = {
           creatorId: resolved.creatorId || record.creatorId || "",
           postId: resolved.postId || record.postId || "",
@@ -2130,12 +2132,13 @@
           const canClear = key === "postPublishedAt" || key === "postDateText";
           if ((value || canClear) && record[key] !== value) {
             record[key] = value;
-            changed = true;
+            recordChanged = true;
           }
         });
+        if (recordChanged) changedRecords.push(record);
       }
-      if (changed) {
-        await saveRecords({ silent: true });
+      if (changedRecords.length) {
+        await saveRecords({ records: changedRecords, silent: true });
         render();
         statusLine.textContent = "已自动刷新帖子数据";
       } else {
@@ -2144,7 +2147,6 @@
     }
 
     async function openReportPng() {
-      await saveRecords();
       window.open(apiEndpoint("/api/report.png").href, "_blank", "noopener,noreferrer");
     }
 
@@ -2487,7 +2489,8 @@
       state.records = state.records.map((item) => selectedIds.has(String(item.id || ""))
         ? withWorkflow({ ...item, reviewStatus: "approved", reviewedAt, reviewedBy: "店长批量审核" })
         : item);
-      const result = await saveRecords({ silent: true });
+      const approvedRecords = state.records.filter((item) => selectedIds.has(String(item.id || "")));
+      const result = await saveRecords({ records: approvedRecords, silent: true });
       button.textContent = "批量批准";
       if (result?.ok === false) {
         state.records = previousRecords;
@@ -2521,7 +2524,7 @@
         reviewedBy: "店长审核"
       });
       state.records = state.records.map((item) => String(item.id || "") === recordId ? updated : item);
-      const result = await saveRecords({ silent: true });
+      const result = await saveRecords({ records: [updated], silent: true });
       if (result?.duplicate) {
         state.records = previousRecords;
         localStorage.setItem(KEY, JSON.stringify(state.records));
@@ -2599,7 +2602,7 @@
             record.archived = false;
             record.createdAt = new Date().toISOString();
             record.highlightUntil = Date.now() + 72 * 60 * 60 * 1000;
-            await saveRecords({ highlightIds: [record.id] });
+            await saveRecords({ records: [record], highlightIds: [record.id] });
             render();
             showToast("已恢复为有效预约");
           }
@@ -2637,6 +2640,7 @@
       record.highlightUntil = archived ? 0 : Date.now() + 72 * 60 * 60 * 1000;
       closeCancelDialog();
       await saveRecords({
+        records: [record],
         silent: archived,
         highlightIds: archived ? [] : [record.id]
       });
@@ -2870,6 +2874,7 @@
       const previousRecords = state.records;
       state.records = state.records.map((item) => String(item.id || "") === recordId ? updated : item);
       const saveResult = await saveRecords({
+        records: [updated],
         silent: isArchivedRecord(updated),
         highlightIds: isArchivedRecord(updated) ? [] : [recordId]
       });
@@ -3449,12 +3454,13 @@
     async function saveRecords(options = {}) {
       localStorage.setItem(KEY, JSON.stringify(state.records));
       if (new URLSearchParams(window.location.search).get("demo") === "1") return { ok: true, storage: "demo" };
+      const recordsToSave = Array.isArray(options.records) ? options.records : state.records;
       try {
         const response = await fetch(apiEndpoint("/api/records"), {
           method: "POST",
           headers: { "Content-Type": "application/json", "Accept": "application/json" },
           body: JSON.stringify({
-            records: state.records,
+            records: recordsToSave,
             silent: Boolean(options.silent),
             legacyImport: Boolean(options.legacyImport),
             highlightIds: options.highlightIds || [],
