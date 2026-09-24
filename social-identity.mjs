@@ -40,6 +40,10 @@ export function isInstagramHost(hostname) {
   return [...INSTAGRAM_HOSTS].some((item) => host === item || host.endsWith(`.${item}`));
 }
 
+export function isUsableXhsPageAttempt(score, hasReliablePostDate) {
+  return Number(score) >= 3 && Boolean(hasReliablePostDate);
+}
+
 export function unwrapRedirectUrl(value) {
   const raw = extractFirstHttpUrl(value);
   if (!raw) return "";

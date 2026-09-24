@@ -2007,7 +2007,23 @@
       if (!needsProfile) return { ...record, resolveMessage: "已从分享文字识别信息，请确认后保存" };
 
       const resolved = await resolveProfileUrl(record.link);
+      const historical = findHistoricalProfile(record, resolved);
       if (!resolved.ok) {
+        if (historical) {
+          return withSocialIdentity({
+            ...record,
+            platform: resolved.platform || historical.platform || record.platform,
+            link: canonicalCreatorProfileUrl(resolved.profileUrl) || historical.link || canonicalWebUrl(record.link),
+            creatorId: resolved.creatorId || historical.creatorId || record.creatorId || "",
+            handle: historical.handle || record.handle || "",
+            name: historical.name || record.name || "",
+            followers: historical.followers || record.followers || "",
+            engagement: historical.engagement || record.engagement || "",
+            bio: historical.bio || record.bio || "",
+            resolveStatus: "已匹配历史资料",
+            resolveMessage: "平台本次没有返回公开资料，已按同一博主的历史记录自动补齐，请确认后保存"
+          });
+        }
         return {
           ...record,
           resolveStatus: "需要解析服务",
@@ -2022,11 +2038,11 @@
         postUrl: record.type === "post"
           ? canonicalPostUrl(resolved.postUrl || resolved.finalUrl) || canonicalPostUrl(record.postUrl || record.link)
           : record.postUrl,
-        handle: record.handle || resolved.handle || "",
-        name: record.name || resolved.name || "",
-        followers: record.followers || resolved.followers || "",
-        engagement: record.engagement || resolved.engagement || "",
-        bio: record.bio || resolved.description || "",
+        handle: record.handle || resolved.handle || historical?.handle || "",
+        name: record.name || resolved.name || historical?.name || "",
+        followers: record.followers || resolved.followers || historical?.followers || "",
+        engagement: record.engagement || resolved.engagement || historical?.engagement || "",
+        bio: record.bio || resolved.description || historical?.bio || "",
         postTitle: record.postTitle || resolved.postTitle || "",
         postPublishedAt: resolved.publishedAt || record.postPublishedAt || "",
         postDateText: resolved.publishedAt ? formatChineseDate(resolved.publishedAt) : record.postDateText || "",
@@ -2045,6 +2061,22 @@
           : "主页链接已保留，但平台没有公开返回博主名字；请手动填写名字后保存"
       });
       return merged;
+    }
+
+    function findHistoricalProfile(record, resolved = {}) {
+      const candidate = withSocialIdentity({
+        ...record,
+        platform: resolved.platform || record.platform,
+        link: resolved.profileUrl || record.link,
+        creatorId: resolved.creatorId || record.creatorId || "",
+        handle: resolved.handle || record.handle || "",
+        name: resolved.name || record.name || ""
+      });
+      return state.records.find((item) => {
+        if (!item || String(item.id || "") === String(record.id || "")) return false;
+        if (!sameCreatorIdentity(item, candidate)) return false;
+        return Boolean(item.name || item.handle || item.followers || item.engagement || item.bio);
+      }) || null;
     }
 
     async function resolveProfileUrl(link) {

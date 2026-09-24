@@ -1,4 +1,4 @@
-const CACHE_VERSION = "pangpang-kol-rsvp-v6-record-level-writes";
+const CACHE_VERSION = "pangpang-kol-rsvp-v7-xhs-short-link-resolver";
 const STATIC_ASSETS = ["./index.html", "./social-identity.mjs", "./rsvp-workflow.mjs", "./manifest.webmanifest"];
 
 self.addEventListener("install", (event) => {
