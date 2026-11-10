@@ -17,7 +17,7 @@ const TRACKING_PARAMS = new Set([
   "utm_medium", "utm_campaign", "igsh"
 ]);
 
-export const SOCIAL_IDENTITY_VERSION = "2026-07-unified-v2";
+export const SOCIAL_IDENTITY_VERSION = "2026-11-rednote-login-guard-v3";
 
 export function extractFirstHttpUrl(value) {
   const raw = String(value || "").trim();
@@ -38,6 +38,10 @@ export function isXhsHost(hostname) {
 export function isInstagramHost(hostname) {
   const host = normalizedHost(hostname);
   return [...INSTAGRAM_HOSTS].some((item) => host === item || host.endsWith(`.${item}`));
+}
+
+export function isXhsPostReference(value) {
+  return /\/(?:explore|discovery\/item|note)\/[^\s/?#]+/i.test(String(value || ""));
 }
 
 export function isUsableXhsPageAttempt(score, hasReliablePostDate) {
@@ -155,6 +159,95 @@ export function normalizeCreatorName(value) {
     .toLowerCase()
     .replace(/^@/, "")
     .replace(/[^\p{L}\p{N}]+/gu, "");
+}
+
+export function isGenericXhsCreatorName(value) {
+  const name = String(value || "").normalize("NFKC").replace(/\s+/g, " ").trim();
+  if (!name) return true;
+
+  const compact = name
+    .toLowerCase()
+    .replace(/[\s\-–—_|｜:：,，.。·•'"“”‘’()[\]{}]+/g, "");
+  if (/^(?:小红书|rednote|red|登录|注册|发现|explore|打开|login|loginto|signin|signup)$/.test(compact)) {
+    return true;
+  }
+  if (/^(?:登录|注册|log\s*in|sign\s*in|sign\s*up)\s*(?:[-–—|｜:：]|to\b)/i.test(name)) {
+    return true;
+  }
+  if (/(?:rednote|小红书).*(?:share\s*,?\s*connect\s*,?\s*love|lifestyle\s*guide|生活兴趣社区)/i.test(name)) {
+    return true;
+  }
+  return false;
+}
+
+export function parseApifyXhsProfileItem(item = {}, target = "") {
+  const profile = item?.profile && typeof item.profile === "object" ? item.profile : item;
+  if (!profile || typeof profile !== "object") {
+    return { ok: false, message: "备用识别没有返回小红书资料" };
+  }
+
+  const creatorId = String(
+    profile.userid || profile.userId || profile.user_id || item?._user_id || item?.userId || ""
+  ).trim();
+  const rawName = String(profile.nickname || profile.nickName || profile.name || "").trim();
+  const name = isGenericXhsCreatorName(rawName) ? "" : rawName;
+  const followers = firstApifySocialCount(profile.fans, profile.followers, profile.followersCount);
+  const engagement = firstApifySocialCount(
+    profile.interactions,
+    profile.interaction,
+    profile.likedAndCollected,
+    profile.likesAndCollects
+  );
+  const following = firstApifySocialCount(profile.follows, profile.following, profile.followingCount);
+  const redId = String(profile.red_id || profile.redId || profile.redid || "").trim();
+  const profileUrl = creatorId
+    ? `https://www.xiaohongshu.com/user/profile/${encodeURIComponent(creatorId)}`
+    : String(profile.url || profile.profileUrl || target || "").trim();
+  const ok = Boolean(name || followers || engagement || redId);
+
+  return {
+    ok,
+    finalUrl: profileUrl || target,
+    profileUrl: profileUrl || target,
+    postUrl: "",
+    platform: "小红书",
+    handle: redId ? `@${redId}` : (creatorId ? `@${creatorId}` : ""),
+    name,
+    followers,
+    engagement,
+    following,
+    postCount: "",
+    postLikes: "",
+    postCollects: "",
+    postComments: "",
+    postShares: "",
+    postMetricsText: "",
+    redId,
+    description: String(profile.desc || profile.description || profile.bio || "").trim(),
+    postTitle: "",
+    publishedAt: "",
+    sourceTitle: "Apify RedNote Profile Scraper",
+    source: "apify",
+    message: ok ? "" : "备用识别没有返回可用的小红书资料"
+  };
+}
+
+function firstApifySocialCount(...values) {
+  for (const value of values) {
+    if (value === 0) return "0";
+    if (value == null || value === "") continue;
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return String(Math.round(value)).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+    }
+    const raw = String(value).trim();
+    if (!raw) continue;
+    const numeric = Number(raw.replace(/,/g, ""));
+    if (Number.isFinite(numeric)) {
+      return String(Math.round(numeric)).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+    }
+    return raw;
+  }
+  return "";
 }
 
 export function normalizeHandle(value) {

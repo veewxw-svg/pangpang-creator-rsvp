@@ -1286,6 +1286,8 @@
   <script type="module">
     import {
       creatorIdentityKey,
+      isGenericXhsCreatorName,
+      isXhsPostReference,
       postIdentityKey,
       sameCreatorIdentity,
       selectBestCreatorMatch,
@@ -2006,7 +2008,15 @@
       const needsProfile = !record.name || !record.handle || !record.followers || !record.engagement || !record.bio;
       if (!needsProfile) return { ...record, resolveMessage: "已从分享文字识别信息，请确认后保存" };
 
-      const resolved = await resolveProfileUrl(record.link);
+      const rawResolved = await resolveProfileUrl(record.link);
+      const resolved = isXhsLink(record.link) && rawResolved.name && isGenericXhsCreatorName(rawResolved.name)
+        ? {
+            ...rawResolved,
+            ok: false,
+            name: "",
+            message: "小红书返回的是登录页，不是博主资料；系统已阻止把它保存成博主名字"
+          }
+        : rawResolved;
       const historical = findHistoricalProfile(record, resolved);
       if (!resolved.ok) {
         if (historical) {
@@ -3326,7 +3336,7 @@
       const shared = [params.get("title"), params.get("text"), params.get("url")].filter(Boolean).join("\n");
       if (!shared) return;
       profileText.value = shared;
-      const likelyPost = /\/explore\/|\/discovery\/item|note|帖子|发布|post/i.test(shared);
+      const likelyPost = isXhsPostReference(shared) || /帖子|发布|\bpost\b/i.test(shared);
       if (likelyPost) {
         setMode("post");
       }

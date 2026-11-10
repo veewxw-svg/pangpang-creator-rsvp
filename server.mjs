@@ -8,7 +8,10 @@ import { promisify } from "node:util";
 import {
   SOCIAL_IDENTITY_VERSION,
   creatorIdentityKey,
+  isGenericXhsCreatorName,
+  isXhsPostReference,
   isUsableXhsPageAttempt,
+  parseApifyXhsProfileItem,
   postIdentityKey,
   withPreservedSocialIdentity,
   withSocialIdentity
@@ -44,6 +47,7 @@ const reportTimeZone = process.env.REPORT_TIME_ZONE || "Asia/Singapore";
 const dailyReportTime = process.env.DAILY_REPORT_TIME || "21:30";
 const apifyToken = process.env.APIFY_TOKEN || "";
 const apifyInstagramActor = process.env.APIFY_IG_ACTOR || "apify/instagram-scraper";
+const apifyXhsActor = process.env.APIFY_XHS_ACTOR || "zen-studio/rednote-user-profile-scraper";
 let dbPoolPromise;
 let dbReadyPromise;
 let recordsWriteQueue = Promise.resolve();
@@ -593,10 +597,10 @@ function canonicalRecordWebUrl(value) {
     if (!["http:", "https:"].includes(url.protocol) || !url.hostname) return "";
     let host = url.hostname.replace(/^www\./, "").toLowerCase();
     const redirectPath = url.searchParams.get("redirectPath") || "";
-    if (/xiaohongshu\.com$/.test(host) && /^\/login\/?$/i.test(url.pathname) && redirectPath) {
+    if (/(?:xiaohongshu|rnote|rednote)\.com$/.test(host) && /^\/login\/?$/i.test(url.pathname) && redirectPath) {
       const nested = new URL(redirectPath);
       const nestedHost = nested.hostname.replace(/^www\./, "").toLowerCase();
-      if (["http:", "https:"].includes(nested.protocol) && /xiaohongshu\.com$/.test(nestedHost)) {
+      if (["http:", "https:"].includes(nested.protocol) && /(?:xiaohongshu|rnote|rednote)\.com$/.test(nestedHost)) {
         url = nested;
         host = url.hostname.replace(/^www\./, "").toLowerCase();
       }
@@ -621,7 +625,10 @@ function canonicalRecordCreatorUrl(value) {
   const url = new URL(safe);
   const host = url.hostname.replace(/^www\./, "").toLowerCase();
   const path = url.pathname.replace(/\/+$/, "");
-  if (/xiaohongshu\.com$/.test(host) && /^\/user\/profile\/[^/]+$/i.test(path)) return safe;
+  if (/(?:xiaohongshu|rnote|rednote)\.com$/.test(host) && /^\/user\/profile\/[^/]+$/i.test(path)) {
+    const creatorId = decodeURIComponent(path.split("/").filter(Boolean)[2] || "");
+    return creatorId ? `https://www.xiaohongshu.com/user/profile/${encodeURIComponent(creatorId)}` : "";
+  }
   if (/instagram\.com$/.test(host)) {
     const segment = path.split("/").filter(Boolean)[0] || "";
     if (segment && !["p", "reel", "reels", "explore", "accounts", "direct", "stories", "share"].includes(segment.toLowerCase())) {
@@ -956,6 +963,7 @@ async function resolveProfile(target) {
 
   try {
     const requestedUrl = canonicalRecordWebUrl(target) || target;
+    const requestedLooksXhs = /xiaohongshu\.com|xhslink\.(?:com|cn)|(?:rnote|rednote)\.com/i.test(requestedUrl);
     if (/rednote\.com/i.test(requestedUrl) && /\/explore\/[^/?#]+/i.test(requestedUrl)) {
       const rednotePost = await fetchRednotePostFallback(requestedUrl, requestedUrl);
       if (rednotePost.name || rednotePost.postTitle) {
@@ -1034,8 +1042,8 @@ async function resolveProfile(target) {
       }
     }
     const instagramJson = await fetchInstagramProfileJson(requestedUrl, finalUrl);
-    const isRequestedXhsPost = /xiaohongshu\.com|xhslink\.com/i.test(`${requestedUrl} ${finalUrl}`)
-      && /\/explore\/|\/discovery\/item|note/i.test(`${requestedUrl} ${finalUrl}`);
+    const isRequestedXhsPost = /xiaohongshu\.com|xhslink\.(?:com|cn)|(?:rnote|rednote)\.com/i.test(`${requestedUrl} ${finalUrl}`)
+      && [requestedUrl, finalUrl].some(isXhsPostReference);
     if (page.status >= 400) {
       if (instagramJson.name || instagramJson.followers || instagramJson.engagement) {
         return {
@@ -1090,6 +1098,11 @@ async function resolveProfile(target) {
           };
         }
       }
+      if (requestedLooksXhs && !isRequestedXhsPost && apifyToken) {
+        const apify = await fetchApifyXhsProfile(finalUrl || requestedUrl)
+          .catch((error) => ({ ok: false, message: error.message || String(error) }));
+        if (apify.ok) return apify;
+      }
       return {
         ok: false,
         finalUrl,
@@ -1103,7 +1116,7 @@ async function resolveProfile(target) {
     const xhsVisible = parseXhsVisibleProfile(html, meta);
     const xhsPost = parseXhsPost(html, meta, finalUrl);
     const instagram = parseInstagramMeta(meta, html, finalUrl);
-    const isXhs = /xiaohongshu\.com|xhslink\.com/i.test(`${finalUrl} ${requestedUrl}`);
+    const isXhs = /xiaohongshu\.com|xhslink\.(?:com|cn)|(?:rnote|rednote)\.com/i.test(`${finalUrl} ${requestedUrl}`);
     const isXhsPost = isRequestedXhsPost;
     const isInstagramPost = /instagram\.com|instagr\.am/i.test(finalUrl) && /\/(?:p|reel|reels)\//i.test(finalUrl);
     const rednotePost = isXhsPost && !xhsPost.profileUrl
@@ -1153,11 +1166,18 @@ async function resolveProfile(target) {
       publishedAt,
       sourceTitle: meta.title || meta.ogTitle || rednotePost.sourceTitle || ""
     };
+    if (isXhs && isGenericXhsCreatorName(result.name)) result.name = "";
+    if (isXhs && isGenericXhsCreatorName(result.postTitle)) result.postTitle = "";
     if (isXhs && !isXhsPost && !(result.name || result.followers || result.engagement || result.redId)) {
+      if (apifyToken) {
+        const apify = await fetchApifyXhsProfile(result.profileUrl || finalUrl || requestedUrl)
+          .catch((error) => ({ ok: false, message: error.message || String(error) }));
+        if (apify.ok) return apify;
+      }
       return {
         ...result,
         ok: false,
-        message: "小红书短链接已经找到主页，但平台暂时没有返回公开资料。请重新复制主页分享链接后再试。"
+        message: "小红书当前把主页转到了登录页，系统已拦住错误标题，但备用识别暂时没有返回资料。请稍后重试或手动填写。"
       };
     }
     return result;
@@ -1355,7 +1375,7 @@ function xhsPageScore(page) {
 
   if (canonicalRecordCreatorUrl(finalUrl) || canonicalRecordPostUrl(finalUrl)) score += 1;
   if (ssr.name || post.name) score += 4;
-  else if (titleName && !/^(?:小红书|登录|注册|发现|red|rednote)$/i.test(titleName)) score += 3;
+  else if (titleName && !isGenericXhsCreatorName(titleName)) score += 3;
   if (ssr.followers || ssr.engagement) score += 2;
   if (post.publishedAt && xhsPageHasReliablePostDate(page)) score += 2;
   if (/"basicInfo"\s*:|"nickname"\s*:|"userId"\s*:/i.test(page.html)) score += 1;
@@ -1393,6 +1413,23 @@ async function fetchApifyInstagram(target) {
   const item = Array.isArray(items) ? items[0] : items?.[0];
   if (!item || typeof item !== "object") return { ok: false, message: "Apify 没有返回 IG 数据" };
   return parseApifyInstagramItem(item, target);
+}
+
+async function fetchApifyXhsProfile(target) {
+  const actorId = apifyXhsActor.replace("/", "~");
+  const endpoint = `https://api.apify.com/v2/acts/${encodeURIComponent(actorId)}/run-sync-get-dataset-items?token=${encodeURIComponent(apifyToken)}`;
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ profileUrls: [target], includeNotes: false })
+  });
+  const items = await response.json().catch(() => []);
+  if (!response.ok) {
+    const message = Array.isArray(items) ? "" : (items?.error?.message || items?.message || "");
+    throw new Error(`Apify XHS HTTP ${response.status}${message ? `: ${message}` : ""}`);
+  }
+  const item = Array.isArray(items) ? items[0] : items?.[0];
+  return parseApifyXhsProfileItem(item, target);
 }
 
 function parseApifyInstagramItem(item, target) {
@@ -1497,7 +1534,7 @@ function parseSharedText(text, finalUrl) {
   return {
     platform,
     profileUrl: /\/user\/profile\//.test(finalUrl) ? finalUrl : "",
-    postUrl: /\/explore\/|\/discovery\/item|note/i.test(finalUrl) ? finalUrl : "",
+    postUrl: isXhsPostReference(finalUrl) ? finalUrl : "",
     handle: handleMatch ? `@${handleMatch[1]}` : "",
     name: homeMatch ? homeMatch[1].replace(/^@/, "") : "",
     followers: followerMatch ? normalizeNumber(followerMatch[1], followerMatch[2]) : "",
@@ -1640,7 +1677,7 @@ function readInstagramStats(sources) {
 }
 
 function parseXhsPost(html, meta, finalUrl) {
-  if (!/xiaohongshu\.com|xhslink\.com/i.test(finalUrl) || !/\/explore\/|\/discovery\/item|note/i.test(finalUrl)) return {};
+  if (!/xiaohongshu\.com|xhslink\.(?:com|cn)|(?:rnote|rednote)\.com/i.test(finalUrl) || !isXhsPostReference(finalUrl)) return {};
   const read = (pattern) => decodeEscaped(html.match(pattern)?.[1] || "");
   const postTitle = cleanXhsTitle(meta.ogTitle || meta.title || "");
   const name = read(/"user":\{[\s\S]{0,800}?"nickname":"((?:\\.|[^"])*)"/)
@@ -1666,10 +1703,7 @@ function parseXhsPost(html, meta, finalUrl) {
 function firstUsableXhsCreatorName(values) {
   for (const value of values || []) {
     const name = String(value || "").trim();
-    const compact = name.replace(/\s+/g, "").toLowerCase();
-    if (!compact) continue;
-    if (/^(?:小红书)+$|^(?:rednote|red|登录|注册|发现|explore)$/i.test(compact)) continue;
-    if (/^(?:rednote|小红书).*(?:lifestyleguide|生活兴趣社区)$/i.test(compact)) continue;
+    if (isGenericXhsCreatorName(name)) continue;
     return name;
   }
   return "";
@@ -1972,7 +2006,7 @@ function parseXhsVisibleProfile(html, meta = {}) {
   const redIdMatch = source.match(/小红书号\s*[:：]?\s*([A-Za-z0-9_-]{3,32})/i);
 
   return {
-    name: /^(?:打开|登录|注册|发现|小红书)$/i.test(name) ? "" : name,
+    name: isGenericXhsCreatorName(name) ? "" : name,
     followers: followerMatch ? normalizeNumber(followerMatch[1], followerMatch[2]) : "",
     following: followingMatch ? normalizeNumber(followingMatch[1], followingMatch[2]) : "",
     redId: redIdMatch?.[1] || ""

@@ -1,4 +1,4 @@
-const CACHE_VERSION = "pangpang-kol-rsvp-v7-xhs-short-link-resolver";
+const CACHE_VERSION = "pangpang-kol-rsvp-v8-rednote-login-guard";
 const STATIC_ASSETS = ["./index.html", "./social-identity.mjs", "./rsvp-workflow.mjs", "./manifest.webmanifest"];
 
 self.addEventListener("install", (event) => {
