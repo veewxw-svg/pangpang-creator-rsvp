@@ -956,13 +956,38 @@ async function readJsonBody(req) {
   return JSON.parse(raw);
 }
 
+async function expandXhsShortLink(shortUrl) {
+  let current = shortUrl;
+  for (let i = 0; i < 5; i++) {
+    try {
+      const response = await fetch(current, { redirect: "manual", headers: { "user-agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1" } });
+      const location = response.headers.get("location");
+      if (!location || response.status < 300 || response.status >= 400) return current;
+      current = new URL(location, current).href;
+      if (/(?:xiaohongshu|rednote|rnote)\.com\/(?:user\/profile|explore|discovery\/item)\//i.test(current)) return current;
+    } catch {
+      return current;
+    }
+  }
+  return current;
+}
+
 async function resolveProfile(target) {
   if (!/^https?:\/\//i.test(target)) {
     return { ok: false, message: "不是有效链接" };
   }
 
   try {
-    const requestedUrl = canonicalRecordWebUrl(target) || target;
+    let requestedUrl = canonicalRecordWebUrl(target) || target;
+    // 2026-11-26：App 分享的主页链接带 xsec_token，服务器打开会被判 404「暂时无法浏览」；
+    // rednote.com 主页也识别不出。先把短链展开、再把主页链接还原成干净的 xiaohongshu.com/user/profile/<id>。
+    if (/xhslink\.(?:com|cn)/i.test(requestedUrl)) {
+      requestedUrl = (await expandXhsShortLink(requestedUrl)) || requestedUrl;
+    }
+    const cleanXhsProfile = canonicalRecordCreatorUrl(requestedUrl);
+    if (cleanXhsProfile && /xiaohongshu\.com\/user\/profile\//i.test(cleanXhsProfile)) {
+      requestedUrl = cleanXhsProfile;
+    }
     const requestedLooksXhs = /xiaohongshu\.com|xhslink\.(?:com|cn)|(?:rnote|rednote)\.com/i.test(requestedUrl);
     if (/rednote\.com/i.test(requestedUrl) && /\/explore\/[^/?#]+/i.test(requestedUrl)) {
       const rednotePost = await fetchRednotePostFallback(requestedUrl, requestedUrl);
