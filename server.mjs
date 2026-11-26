@@ -1151,7 +1151,7 @@ async function resolveProfile(target) {
       platform: instagramJson.platform || instagram.platform || parsed.platform,
       handle: instagramJson.handle || instagram.handle || xhsPost.handle || rednotePost.handle || rednoteProfile.handle || (isXhs || isInstagramPost ? "" : parsed.handle),
       name: instagramJson.name || instagram.name || resolvedXhsName,
-      followers: instagramJson.followers || instagram.followers || xhsVisible.followers || ssr.followers || rednoteProfile.followers || (parsed.followers && parsed.followers !== "1" ? parsed.followers : ""),
+      followers: instagramJson.followers || instagram.followers || ssr.followers || xhsVisible.followers || rednoteProfile.followers || (parsed.followers && parsed.followers !== "1" ? parsed.followers : ""),
       engagement: instagramJson.engagement || instagram.engagement || ssr.engagement || rednoteProfile.engagement || parsed.engagement,
       following: instagramJson.following || instagram.following || xhsVisible.following || "",
       postCount: instagramJson.postCount || instagram.postCount || "",
@@ -1973,9 +1973,24 @@ function parseXhsSsr(html) {
     name: read(/"basicInfo":\{[\s\S]*?"nickname":"([^"]+)"/),
     redId: read(/"basicInfo":\{[\s\S]*?"redId":"([^"]+)"/),
     description: read(/"basicInfo":\{[\s\S]*?"desc":"((?:\\.|[^"])*)"/),
-    followers: readInteraction("粉丝", "fans"),
-    engagement: readInteraction("获赞与收藏", "interaction")
+    // 2026-11：小红书跳转 rednote.com 后，未登录只给区间（"fans":"1k+","likeAndCollect":"10k+"），不再给精确数
+    followers: readInteraction("粉丝", "fans") || bucketCount(read(/"fans":"([^"]+)"/)),
+    engagement: readInteraction("获赞与收藏", "interaction") || bucketCount(read(/"likeAndCollect":"([^"]+)"/))
   };
+}
+
+function bucketCount(raw) {
+  const value = String(raw || "").trim();
+  if (!value) return "";
+  const m = value.match(/^([\d.]+)\s*([kKwW万千]?)(\+?)$/);
+  if (!m) return value;
+  const n = Number(m[1]);
+  const unit = m[2].toLowerCase();
+  let text = value;
+  if (unit === "k" || unit === "千") text = n >= 10 ? `${n / 10}万` : `${n}千`;
+  else if (unit === "w" || unit === "万") text = `${n}万`;
+  else text = m[1];
+  return `${text}${m[3] ? "+" : ""}`;
 }
 
 function parseXhsVisibleProfile(html, meta = {}) {
